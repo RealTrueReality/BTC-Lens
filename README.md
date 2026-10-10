@@ -1,5 +1,7 @@
 # BTC Lens
 
+[![Build and verify](https://github.com/RealTrueReality/BTC-Lens/actions/workflows/ci.yml/badge.svg)](https://github.com/RealTrueReality/BTC-Lens/actions/workflows/ci.yml)
+
 **一个从个人交易习惯出发的 BTC 盯盘与交易复盘工作区。**
 
 BTC Lens combines a BTC market radar, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data or deterministic offline replay.

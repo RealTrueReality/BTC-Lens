@@ -23,6 +23,6 @@ V0.2 新增测试覆盖聚合 count 不重复计量、BTC 合约面值、主动�
 
 检查脚本：`tools/check-order-flow.cjs`、`tools/check-flow-restart.cjs`。重启检查需先运行前者并保留实时模式、停止并重新启动相同测试数据库，再运行后者。
 
-CI 已配置，尚未推送远程仓库，未声称 GitHub Actions 已运行。
+公开仓库：[RealTrueReality/BTC-Lens](https://github.com/RealTrueReality/BTC-Lens)。每次推送会执行 Release 构建、xUnit 测试与离线浏览器流程；远程执行结果以 [GitHub Actions](https://github.com/RealTrueReality/BTC-Lens/actions/workflows/ci.yml) 为准。上表记录本地验证结果。
 
 示例交易和截图使用合成数据。上述验证证明软件边界与流程，不证明策略收益或完整个人 setup 的资格。
