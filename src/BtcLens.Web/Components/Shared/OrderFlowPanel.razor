@@ -1,0 +1,74 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ILensStore Store
+<section class="panel flow-panel" data-testid="order-flow">
+    <div class="panel-heading"><div><span class="eyebrow">ORDER FLOW · OKX</span><h2>现货 / 永续订单流</h2></div><div class="flow-controls"><label>采样显示<select aria-label="订单流显示周期" @bind="interval"><option value="1">1m</option><option value="5">5m</option><option value="15">15m</option></select></label><span class="pill @(Flow.Mode == "demo" ? "amber" : "green")">@(Flow.Mode == "demo" ? "合成演示" : "实盘采集")</span></div></div>
+    <div class="flow-metrics">
+        @foreach (var instrument in FlowRules.Instruments)
+        {
+            var segment = Flow.Latest(instrument);
+            <div class="flow-metric" data-instrument="@instrument"><span class="metric-label">@(instrument == FlowRules.Spot ? "现货 CVD" : "永续 CVD") <small>@instrument</small></span><strong class="mono @(segment?.CvdBtc < 0 ? "negative" : "positive")">@(segment is { Messages: > 0 } ? segment.CvdBtc.ToString("+0.0000;-0.0000;0.0000") : "—") <small>BTC</small></strong><span class="flow-status">@SegmentStatus(segment)</span><small>累计起点：@(segment is { Messages: > 0 } ? LensFormat.Time(segment.StartedAt) : "等待首笔成交")</small><small>最后成交：@(segment?.LastTradeAt is long time ? LensFormat.Time(time) : "—")</small></div>
+        }
+        <div class="flow-metric"><span class="metric-label">永续 OI <small>BTC-USDT-SWAP</small></span><strong class="mono">@(LatestOi?.CoinBtc.ToString("N2") ?? "—") <small>BTC</small></strong><span class="flow-status">@(LatestOi is null ? "等待 OI" : Flow.Mode == "demo" ? "合成持仓量" : Now - LatestOi.Timestamp > 30_000 ? "样本已过期" : "REST · 10 秒采样")</span><small>@(LatestOi is null ? "张数 / USD：—" : $"{LatestOi.Contracts:N2} 张 / {LatestOi.Usd:N0} USD")</small><small>样本时间：@(LatestOi is null ? "—" : LensFormat.Time(LatestOi.Timestamp))</small></div>
+    </div>
+    @if (Flow.Error is not null && Flow.Mode == "live") { <div class="flow-error">@Flow.Error；不同段从零重新累计。</div> }
+    @if (Flow.OiError is not null && Flow.Mode == "live") { <div class="flow-error">@Flow.OiError</div> }
+    <div class="flow-chart-labels"><span><i class="legend-dot green"></i>现货 CVD · BTC</span><span><i class="legend-dot amber"></i>永续 CVD · BTC</span><span><i class="legend-dot blue"></i>永续 OI · BTC</span></div>
+    <div class="flow-chart" @ref="host"><div class="chart-loading">正在绘制订单流…</div></div>
+    <div class="flow-caption">@Flow.Status · 时间 UTC+8 · @Flow.Points.Length 个 CVD 点 / @Flow.OpenInterest.Length 个 OI 样本。显示最近 24 小时内各品种最多 6 个采集段（CVD、OI 各最多 3,000 条）；累计起点按每段首笔成交，不按日重置。</div>
+    <p class="flow-note">@(Flow.Mode == "demo" ? "此处是独立合成的订单流和持仓量，用于体验界面；OHLCV 不能还原真实主动买卖成交。" : "仅覆盖 OKX 的两个指定品种。断线、停机和未采集历史不回补；不同累计起点的 CVD 数值不能直接比较。") OI 增加本身不说明新开多单；USD 名义量也会随价格变化。</p>
+    <details class="flow-records"><summary>采集记录与缺口 · @Flow.Segments.Length 个分段</summary>
+        <div class="flow-record-list">
+        @foreach (var segment in Flow.Segments.OrderByDescending(s => s.ConnectedAt).Take(12))
+        {
+            <article class="flow-record"><div><b>@segment.Instrument</b><span class="pill">@(segment.EndedAt is null ? "当前段" : "已结束")</span></div><p>首笔 @LensFormat.Time(segment.StartedAt) · @segment.Messages 条聚合消息 / @segment.Matches 笔撮合 · 净 @segment.CvdBtc.ToString("0.########") BTC</p><small>主动买 @segment.BuyBtc.ToString("0.########") / 主动卖 @segment.SellBtc.ToString("0.########") BTC · @segment.Algorithm</small><small>@(segment.EndReason ?? segment.StartReason)</small><code>段 ID：@segment.Id</code>
+            @if (Flow.Mode == "live") { <button class="text-button" @onclick="() => Export(segment)">导出此段最近 500 条成交与当前汇总 ↗</button> }
+            </article>
+        }
+        </div>
+        <p class="flow-note">导出保留聚合消息原始数量、count、主动方、价格、成交 ID、序列 ID、接收时间和合约换算参数。汇总覆盖完整采集段；成交明细只导出最近 500 条，数量会在文件内标明。列表显示最近 12 段，历史记录保存在本地数据库。</p>
+    </details>
+</section>
+@code {
+    [Parameter] public FlowView Flow { get; set; } = FlowView.Empty;
+    private int interval = 1;
+    private ElementReference host;
+    private IJSObjectReference? module, chart;
+    private string identity = "";
+    private long Now => Flow.Mode == "demo" ? Flow.AsOf : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    private OpenInterestSample? LatestOi => Flow.OpenInterest.LastOrDefault();
+    private string SegmentStatus(FlowSegment? segment) => segment is null ? "尚未采集" : Flow.Mode == "demo" ? "合成主动成交" :
+        segment.EndedAt is not null ? "已暂停 · 以前的段" : segment.Messages == 0 ? "已订阅 · 等待首笔" :
+        Now - segment.LastTradeAt > 30_000 ? "最后成交已过期" : "正在采集 · 本段独立累计";
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (firstRender) { module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/order-flow.js"); chart = await module.InvokeAsync<IJSObjectReference>("create", host); }
+            if (chart is null) return;
+            var next = Flow.Mode + ":" + interval + ":" + (Flow.Mode == "demo" ? Flow.Segments.FirstOrDefault()?.Id : "live");
+            await chart.InvokeVoidAsync("update", Flow.Points.Select(p => new { p.SegmentId, p.Instrument, time = p.Timestamp / 1000, value = p.CvdBtc }),
+                Flow.OpenInterest.Select(s => new { time = s.Timestamp / 1000, value = s.CoinBtc }), interval, next != identity, Flow.Mode == "demo" ? 300 : 30);
+            identity = next;
+        }
+        catch (JSDisconnectedException) { }
+    }
+    private async Task Export(FlowSegment segment)
+    {
+        var capture = Store.CaptureFlow(segment.Id);
+        if (capture is null) return;
+        segment = capture.Segment;
+        var trades = capture.Trades;
+        var json = JsonCodec.Write(new { exportedAt = DateTimeOffset.UtcNow, segment,
+            detailCoverage = "Most recent 500 aggregate messages only; full segment summary is separate",
+            exportedMessages = trades.Length, completeDetail = trades.LongLength == segment.Messages,
+            quantityUnit = "BTC", source = "OKX public trades channel", trades });
+        await using var files = await JS.InvokeAsync<IJSObjectReference>("import", "./js/files.js");
+        await files.InvokeVoidAsync("download", "btclens-order-flow-" + segment.Id + ".json", json);
+    }
+    public async ValueTask DisposeAsync()
+    {
+        try { if (chart is not null) { await chart.InvokeVoidAsync("dispose"); await chart.DisposeAsync(); } if (module is not null) await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
+}

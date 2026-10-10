@@ -1,0 +1,155 @@
+@page "/journal"
+@implements IDisposable
+@inject MarketEngine Market
+@inject ILensStore Store
+@inject ISnackbar Snack
+@inject NavigationManager Navigation
+<PageTitle>交易手记 · BTC Lens</PageTitle>
+<div class="page-heading"><div><div class="eyebrow">MAKE EVERY DECISION TRACEABLE</div><h1>交易手记<span class="title-dot">.</span></h1><p>记下当时的理由，也记下后来的发现。</p></div><div class="button-group"><button class="button" @onclick="OpenImport">导入 CSV</button><button class="button primary" @onclick="() => NewTrade(null)">＋ 记录交易</button></div></div>
+<div class="context-strip"><span class="pill @(mode == "demo" ? "amber" : "green")">@(mode == "demo" ? "演示记录" : "个人记录")</span><span>@(mode == "demo" ? "合成示例用于展示流程，统计不代表实际交易业绩。" : "手动记录你的实际交易；行情接口不会读取账户成交。")</span><span class="push-right">@trades.Length 笔记录</span></div>
+<div class="journal-layout">
+    <section class="panel"><div class="panel-heading"><h2>交易记录</h2><div class="filter-tabs"><button class="@(filter == "all" ? "active" : "")" @onclick='() => filter = "all"'>全部</button><button class="@(filter == "open" ? "active" : "")" @onclick='() => filter = "open"'>持仓中</button><button class="@(filter == "closed" ? "active" : "")" @onclick='() => filter = "closed"'>已平仓</button></div></div>
+        <div class="table-wrap"><table class="trade-table"><thead><tr><th>交易 / 时间</th><th>方向</th><th>入场 → 平仓</th><th>净盈亏</th><th>净 R</th><th>复盘</th></tr></thead><tbody>
+        @foreach (var t in Filtered)
+        {
+            var result = TradeMath.Calculate(t);
+            <tr class="clickable @(selected?.Id == t.Id ? "row-selected" : "")" @onclick="() => selected = t"><td><b>BTC 永续</b><small>@LensFormat.Time(t.EntryTime)</small></td><td><span class="pill @(t.Side == TradeSide.Long ? "green" : "red")">@(t.Side == TradeSide.Long ? "做多" : "做空")</span></td><td class="mono">@LensFormat.Price(t.EntryPrice)<small>→ @(t.Closed ? LensFormat.Price(t.ExitPrice) : "持仓中")</small></td><td class="mono @(result.Net > 0 ? "positive" : result.Net < 0 ? "negative" : "muted")">@(t.Closed ? LensFormat.Money(result.Net) : "—")<small>@(t.Closed && result.Net is null ? "成本待补全" : "USDT")</small></td><td class="mono">@(result.NetR?.ToString("0.00") + (result.NetR.HasValue ? " R" : "—"))</td><td><span class="review-state @(string.IsNullOrWhiteSpace(t.Review) ? "" : "complete")">@(string.IsNullOrWhiteSpace(t.Review) ? "待复盘" : "已复盘")</span></td></tr>
+        }
+        @if (!Filtered.Any()) { <tr><td colspan="6" class="empty-cell">还没有交易记录。可以手动添加，或用模板导入。</td></tr> }
+        </tbody></table></div></section>
+    <aside class="panel review-panel">
+        @if (selected is not null)
+        {
+            var r = TradeMath.Calculate(selected);
+            <div class="panel-heading"><h2>交易详情</h2><button class="text-button accent" @onclick="() => EditTrade(selected)">编辑 / 复盘</button></div>
+            <div class="review-content"><div class="trade-detail-head"><span class="pill @(selected.Side == TradeSide.Long ? "green" : "red")">@(selected.Side == TradeSide.Long ? "做多" : "做空")</span><span class="muted">@(selected.Closed ? "已平仓" : "持仓中")</span></div><div class="detail-pnl mono @(r.Net > 0 ? "positive" : r.Net < 0 ? "negative" : "")">@(selected.Closed ? LensFormat.Money(r.Net) : "持仓中")<small>@(selected.Closed ? "USDT · 净盈亏" : "")</small></div>
+            <dl class="detail-grid"><div><dt>BTC 数量</dt><dd class="mono">@selected.QuantityBtc</dd></div><div><dt>初始风险</dt><dd class="mono">@(r.InitialRisk?.ToString("0.00") ?? "未提供")</dd></div><div><dt>初始止损</dt><dd class="mono">@LensFormat.Price(selected.InitialStop)</dd></div><div><dt>原定目标</dt><dd class="mono">@LensFormat.Price(selected.Target)</dd></div><div><dt>总手续费</dt><dd class="mono">@(selected.Fees?.ToString("0.00") ?? "待补全")</dd></div><div><dt>资金费（收入为正）</dt><dd class="mono">@(selected.Funding?.ToString("0.00") ?? "待补全")</dd></div></dl>
+            <h3>当时的判断</h3><p class="preserve">@selected.Reason</p><h3>复盘发现</h3><p class="preserve">@(string.IsNullOrWhiteSpace(selected.Review) ? "平仓后回来补充：哪些判断得到验证，哪些执行需要改进？" : selected.Review)</p>
+            @if (!string.IsNullOrWhiteSpace(selected.Tags)) { <div class="tag-list">@foreach (var tag in selected.Tags.Split([',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) { <span class="pill">@tag</span> }</div> }
+            @if (selected.AlertId is string eventId && Store.FindAlert(eventId) is { } linked) { <details><summary>关联到区证据 · @LensFormat.Time(linked.CreatedAt)</summary><p>@linked.Summary</p><p class="muted">@linked.Zone.Name · v@(linked.Revision) · @LensFormat.Price(linked.Zone.Lower)–@LensFormat.Price(linked.Zone.Upper)</p></details> }
+            @if (selected.EntrySnapshotJson is not null) { <details><summary>记录时行情快照</summary><p class="muted">捕获时间以数据内记录为准；补录历史交易时，不代表历史开仓时盘面。</p><pre class="json-block">@selected.EntrySnapshotJson</pre></details> }
+            @if (selected.ScreenshotDataUrl is not null) { <figure class="trade-screenshot"><img src="@selected.ScreenshotDataUrl" alt="这笔交易的复盘截图" /></figure> }
+            </div>
+        }
+        else { <div class="empty-state"><span>▤</span><b>选择一笔交易</b><p>查看入场依据、风险与复盘记录。</p></div> }
+    </aside>
+</div>
+@if (form is not null)
+{
+    <div class="modal-backdrop"><section class="modal wide" role="dialog" aria-modal="true" aria-label="交易编辑"><div class="modal-heading"><div><span class="eyebrow">TRADE JOURNAL</span><h2>@(editing is null ? "记录一笔交易" : "补充平仓与复盘")</h2></div><button class="icon-button" aria-label="关闭交易编辑" @onclick="() => form = null">×</button></div>
+        <form @onsubmit="SaveTrade" @onsubmit:preventDefault><div class="form-grid three"><label>方向<select disabled="@(editing is not null)" @bind="form.Side"><option value="Long">做多</option><option value="Short">做空</option></select></label><label>实际开仓价<input disabled="@(editing is not null)" type="number" min="0.1" step="0.1" required @bind="form.EntryPrice" /></label><label>BTC 数量<input disabled="@(editing is not null)" type="number" min="0.000001" step="0.000001" required @bind="form.Quantity" /></label><label>开仓时间（北京时间）<input disabled="@(editing is not null)" type="datetime-local" required @bind="form.EntryLocal" @bind:format="yyyy-MM-ddTHH:mm" /></label><label>初始止损（可留空）<input disabled="@(editing is not null)" type="number" step="0.1" @bind="form.Stop" /></label><label>原定目标（可留空）<input type="number" step="0.1" @bind="form.Target" /></label></div>
+        <label class="checkbox-label"><input type="checkbox" @bind="form.Closed" />这笔交易已平仓</label>
+        @if (form.Closed) { <div class="form-grid"><label>实际平仓价<input type="number" min="0.1" step="0.1" required @bind="form.ExitPrice" /></label><label>平仓时间（北京时间）<input type="datetime-local" required @bind="form.ExitLocal" @bind:format="yyyy-MM-ddTHH:mm" /></label></div> }
+        <div class="form-grid"><label>总手续费（USDT）<input type="number" min="0" step="0.0001" @bind="form.Fees" /></label><label>资金费（收入为正，USDT）<input type="number" step="0.0001" @bind="form.Funding" /></label></div><p class="form-note">费用未知时留空，净盈亏待补全。确定没有资金费时填写 0。入场与初始风险保存后固定。</p>
+        <label>开仓理由<textarea rows="2" maxlength="4000" @bind="form.Reason"></textarea></label><label>复盘记录<textarea rows="3" maxlength="12000" @bind="form.Review"></textarea></label><label>标签（用逗号分隔）<input maxlength="1000" placeholder="按计划执行,提前入场,移动止损…" @bind="form.Tags" /></label><label>复盘截图（PNG / JPEG，最大 2 MB）<InputFile OnChange="UploadScreenshot" accept="image/png,image/jpeg" /></label>
+        @if (form.Screenshot is not null) { <div class="screenshot-preview"><img src="@form.Screenshot" alt="已选择的复盘截图" /><button type="button" class="text-button" @onclick="() => form.Screenshot = null">移除截图</button></div> }
+        @if (form.AlertId is not null) { <p class="form-note">已关联到区提醒；原始提醒快照继续保留。</p> }
+        @if (error is not null) { <div class="inline-error">@error</div> }
+        <div class="modal-actions"><button type="button" class="button ghost" @onclick="() => form = null">取消</button><button type="submit" class="button primary" disabled="@uploading">@(uploading ? "正在读取截图…" : "保存交易")</button></div></form></section></div>
+}
+@if (importOpen)
+{
+    <div class="modal-backdrop"><section class="modal wide" role="dialog" aria-modal="true" aria-label="CSV 导入"><div class="modal-heading"><div><span class="eyebrow">CSV IMPORT</span><h2>导入交易记录</h2></div><button class="icon-button" aria-label="关闭导入" @onclick="() => importOpen = false">×</button></div><p class="muted">当前目标：@(mode == "demo" ? "演示记录" : "个人记录")。使用固定模板，一行对应一笔交易，时间必须包含时区。</p><a class="button small" href="/downloads/trades-template.csv" download>↓ 下载 CSV 模板</a><label class="upload-area">选择 CSV 文件<InputFile OnChange="ReadCsv" accept=".csv,text/csv" /></label><p class="form-note">最大 1 MB / 1000 行。先检查，再一次性写入；相同 external_id 防止重复导入。</p>
+        @if (preview is not null)
+        {
+            <div class="import-summary"><b>@preview.Trades.Length 条已解析</b><span>@preview.Errors.Length 条错误</span></div>
+            @foreach (var e in preview.Errors.Take(12)) { <div class="inline-error">@e</div> }
+            @if (preview.Trades.Length > 0) { <div class="table-wrap"><table><thead><tr><th>external_id</th><th>方向</th><th>开仓价</th><th>数量</th></tr></thead><tbody>@foreach (var t in preview.Trades.Take(8)) { <tr><td>@t.ImportKey</td><td>@t.Side</td><td>@t.EntryPrice</td><td>@t.QuantityBtc</td></tr> }</tbody></table></div> }
+        }
+        @if (error is not null) { <div class="inline-error">@error</div> }
+        <div class="modal-actions"><button class="button ghost" @onclick="() => importOpen = false">取消</button><button class="button primary" disabled="@(preview is null || preview.Errors.Length > 0 || preview.Trades.Length == 0)" @onclick="ImportCsv">确认导入</button></div></section></div>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "alert")] public string? AlertId { get; set; }
+    private string mode = "demo", filter = "all", formMode = "demo";
+    private Trade[] trades = [];
+    private Trade? selected, editing;
+    private TradeEditor? form;
+    private string? error, consumedAlert;
+    private bool importOpen, uploading;
+    private ImportPreview? preview;
+    private IEnumerable<Trade> Filtered => trades.Where(t => filter == "all" || (filter == "closed" ? t.Closed : !t.Closed));
+    protected override void OnInitialized() { Reload(); Market.Changed += Changed; }
+    protected override void OnParametersSet()
+    {
+        if (AlertId is not null && AlertId != consumedAlert) { consumedAlert = AlertId; var a = Store.FindAlert(AlertId); if (a is not null && a.Scope == Market.View.Scope) NewTrade(a); }
+    }
+    private void Reload() { mode = Market.View.Mode; trades = Store.Trades(mode); selected = trades.FirstOrDefault(t => t.Id == selected?.Id) ?? trades.FirstOrDefault(); }
+    private void Changed() { if (mode != Market.View.Mode) _ = InvokeAsync(() => { form = null; importOpen = false; selected = null; Reload(); StateHasChanged(); }); }
+    private void NewTrade(AlertEvent? alert)
+    {
+        editing = null; error = null; formMode = mode;
+        form = new() { EntryPrice = alert?.Price ?? Market.View.Quote?.Price ?? 0, Quantity = .01m,
+            EntryLocal = DateTimeOffset.FromUnixTimeMilliseconds(Market.View.Cutoff).ToOffset(TimeSpan.FromHours(8)).DateTime,
+            ExitLocal = DateTimeOffset.FromUnixTimeMilliseconds(Market.View.Cutoff).ToOffset(TimeSpan.FromHours(8)).DateTime,
+            AlertId = alert?.Id, Side = alert?.Zone.Bias == Bias.Bearish ? TradeSide.Short : TradeSide.Long,
+            Reason = alert is null ? "" : alert.Zone.Notes + "\n" + alert.Summary };
+    }
+    private void EditTrade(Trade trade)
+    {
+        editing = trade; error = null; formMode = mode;
+        form = new() { Side = trade.Side, EntryPrice = trade.EntryPrice, Quantity = trade.QuantityBtc, EntryLocal = trade.EntryTime.ToOffset(TimeSpan.FromHours(8)).DateTime,
+            Closed = trade.Closed, ExitPrice = trade.ExitPrice, ExitLocal = trade.ExitTime?.ToOffset(TimeSpan.FromHours(8)).DateTime,
+            Stop = trade.InitialStop, Target = trade.Target, Fees = trade.Fees, Funding = trade.Funding,
+            Reason = trade.Reason, Review = trade.Review, Tags = trade.Tags, AlertId = trade.AlertId, Screenshot = trade.ScreenshotDataUrl };
+    }
+    private void SaveTrade()
+    {
+        try
+        {
+            if (uploading) throw new ArgumentException("截图正在读取，请稍后保存。");
+            if (formMode != Market.View.Mode) throw new ArgumentException("模式已变化，请重新打开交易编辑。");
+            var f = form!; var market = Market.View;
+            var snapshot = editing is not null ? editing.EntrySnapshotJson : JsonCodec.Write(new { capturedAt = DateTimeOffset.UtcNow, market.Cutoff, market.Mode, market.Quote, market.Instrument,
+                orderFlow = market.Flow, context = AnalysisReport.Build(market, Store.Watches(market.Scope)) });
+            var t = (editing ?? new Trade { Mode = mode }) with { Side = f.Side, EntryPrice = f.EntryPrice, QuantityBtc = f.Quantity,
+                EntryTime = editing?.EntryTime ?? new DateTimeOffset(DateTime.SpecifyKind(f.EntryLocal, DateTimeKind.Unspecified), TimeSpan.FromHours(8)),
+                InitialStop = f.Stop, Target = f.Target, ExitPrice = f.Closed ? f.ExitPrice : null,
+                ExitTime = f.Closed && f.ExitLocal.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(f.ExitLocal.Value, DateTimeKind.Unspecified), TimeSpan.FromHours(8)) : null,
+                Fees = f.Fees, Funding = f.Funding, Reason = f.Reason, Review = f.Review, Tags = f.Tags, AlertId = f.AlertId,
+                ScreenshotDataUrl = f.Screenshot, EntrySnapshotJson = snapshot };
+            if (f.Closed && (t.ExitPrice is null || t.ExitTime is null)) throw new ArgumentException("已平仓交易需要平仓价和时间。");
+            Store.SaveTrade(t); form = null; Reload(); selected = trades.First(x => x.Id == t.Id);
+            if (AlertId is not null) Navigation.NavigateTo("/journal", replace: true);
+            Snack.Add("交易与复盘已保存。", Severity.Success);
+        }
+        catch (ArgumentException ex) { error = ex.Message; }
+    }
+    private async Task UploadScreenshot(InputFileChangeEventArgs args)
+    {
+        var target = form; if (target is null) return;
+        uploading = true;
+        try
+        {
+            var file = args.File; if (file.ContentType is not ("image/png" or "image/jpeg")) throw new ArgumentException("仅支持 PNG/JPEG。");
+            await using var stream = file.OpenReadStream(2_000_000); using var buffer = new MemoryStream(); await stream.CopyToAsync(buffer);
+            var bytes = buffer.ToArray();
+            var isPng = bytes.Length >= 8 && bytes.Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+            var isJpeg = bytes.Length >= 3 && bytes[0] == 255 && bytes[1] == 216 && bytes[2] == 255;
+            if (!(isPng && file.ContentType == "image/png" || isJpeg && file.ContentType == "image/jpeg")) throw new ArgumentException("文件内容与图片类型不匹配。");
+            target.Screenshot = $"data:{file.ContentType};base64,{Convert.ToBase64String(bytes)}"; error = null;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException) { error = ex.Message; }
+        finally { uploading = false; }
+    }
+    private void OpenImport() { importOpen = true; preview = null; error = null; formMode = mode; }
+    private async Task ReadCsv(InputFileChangeEventArgs args)
+    {
+        try { using var reader = new StreamReader(args.File.OpenReadStream(1_000_000)); preview = TradeCsv.Preview(await reader.ReadToEndAsync(), formMode); error = null; }
+        catch (IOException ex) { error = ex.Message; }
+    }
+    private void ImportCsv()
+    {
+        try { if (formMode != Market.View.Mode) throw new ArgumentException("模式已变化，请重新预览文件。"); if (preview is null || preview.Errors.Length > 0) return; var added = Store.ImportTrades(preview.Trades); importOpen = false; Reload(); Snack.Add($"新增 {added} 条交易记录；相同内容的重复记录已跳过。", Severity.Success); }
+        catch (ArgumentException ex) { error = ex.Message; }
+    }
+    public void Dispose() => Market.Changed -= Changed;
+    private sealed class TradeEditor
+    {
+        public TradeSide Side { get; set; } public decimal EntryPrice { get; set; } public decimal Quantity { get; set; }
+        public DateTime EntryLocal { get; set; } public bool Closed { get; set; } public decimal? ExitPrice { get; set; }
+        public DateTime? ExitLocal { get; set; } public decimal? Stop { get; set; } public decimal? Target { get; set; }
+        public decimal? Fees { get; set; } public decimal? Funding { get; set; } public string Reason { get; set; } = "";
+        public string Review { get; set; } = ""; public string Tags { get; set; } = ""; public string? AlertId { get; set; } public string? Screenshot { get; set; }
+    }
+}

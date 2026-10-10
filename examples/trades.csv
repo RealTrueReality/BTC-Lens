@@ -1,0 +1,2 @@
+external_id,side,entry_time,exit_time,entry_price,exit_price,quantity_btc,initial_stop,target,fees,funding,reason,review,tags
+example-001,Long,2026-09-20T09:00:00+08:00,2026-09-20T10:00:00+08:00,67000,67300,0.01,66900,67300,0.6,0,manual example,review example,planned

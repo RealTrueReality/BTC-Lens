@@ -1,0 +1,14 @@
+**/bin/
+**/obj/
+**/App_Data/
+**/logs/
+**/node_modules/
+**/test-results/
+*.user
+*.db
+*.db-shm
+*.db-wal
+.vs/
+.env
+appsettings.Local.json
+artifacts/

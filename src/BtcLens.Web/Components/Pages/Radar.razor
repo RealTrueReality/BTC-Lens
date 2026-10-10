@@ -1,0 +1,117 @@
+@page "/"
+@implements IDisposable
+@inject MarketEngine Market
+@inject ILensStore Store
+@inject ISnackbar Snack
+@inject IJSRuntime JS
+<PageTitle>行情雷达 · BTC Lens</PageTitle>
+<div class="page-heading"><div><div class="eyebrow">OBSERVE WITH INTENTION</div><h1>行情雷达<span class="title-dot">.</span></h1><p>发现参考区域，保留自己的判断。</p></div><button class="button primary" @onclick="NewWatch"><span>＋</span> 添加关注区</button></div>
+@if (view.Mode == "demo")
+{
+    <div class="demo-banner"><div><span class="pill amber">DEMO</span><span>合成数据回放 · 截至 <b>@LensFormat.Time(view.Cutoff)</b> 北京时间</span><small>仅使用当前截止点前的数据；以 5m 收盘价推进。</small></div><div class="button-group"><button class="button small ghost" @onclick="NewReplay">新回放</button><button class="button small" disabled="@(busy || view.ReplayIndex >= view.ReplayTotal)" @onclick="() => Step(1)">下一根 →</button><button class="button small amber-button" disabled="@(busy || view.ReplayIndex >= view.ReplayTotal)" @onclick="() => Step(5)">推进 5 根</button></div></div>
+}
+else
+{
+    <div class="live-banner"><span class="status-dot"></span><span>@view.Status</span><span class="muted">公共行情 · 无需账户密钥 · @view.Transport</span><span class="push-right muted">@(view.Quote is null ? "等待价格" : "价格时间 " + LensFormat.Time(view.Quote.Timestamp))</span></div>
+    @if (view.Error is not null) { <div class="inline-error">@view.Error</div> }
+}
+<div class="metric-grid">
+    <div class="metric"><span class="metric-label"><span class="btc-mini">₿</span> BTC / USDT <span class="metric-unit">永续</span></span><div class="metric-number mono">@LensFormat.Price(view.Quote?.Price)<small>USDT</small></div><span class="metric-foot">最新观测价 · @view.Transport</span></div>
+    <div class="metric"><span class="metric-label">我的关注区</span><div class="metric-number mono">@watches.Count(w => w.Enabled)<small>监控中</small></div><span class="metric-foot"><span class="tiny-line amber-line"></span>@watches.Count(w => w.Triggered) 个已记录首次到区</span></div>
+    <div class="metric"><span class="metric-label">自动参考区域</span><div class="metric-number mono">@view.Zones.Count(z => z.Life is ZoneLife.Active or ZoneLife.Touched)<small>当前候选</small></div><span class="metric-foot">FVG + Reference OB · 已确认数据</span></div>
+    <div class="metric"><span class="metric-label">到区记录</span><div class="metric-number mono">@alerts.Length<small>本工作区</small></div><span class="metric-foot">触发价格与证据快照一起保留</span></div>
+</div>
+<div class="radar-grid">
+    <section class="panel chart-panel">
+        <div class="panel-heading"><div class="instrument-title"><span class="btc-icon">₿</span><div><b>Bitcoin <span class="muted">/ USDT</span></b><small>OKX · 永续合约 · @timeframe</small></div></div><div class="timeframes">@foreach (var tf in Timeframes.All) { <button class="@(timeframe == tf ? "active" : "")" @onclick="() => timeframe = tf">@tf</button> }</div></div>
+        <div class="chart-toolbar"><div class="layer-options"><label><input type="checkbox" @bind="showFvg" /><span class="legend-dot green"></span>FVG</label><label><input type="checkbox" @bind="showOb" /><span class="legend-dot red"></span>OB</label><label><input type="checkbox" @bind="showLevels" />关键价格</label><label><input type="checkbox" @bind="showHtf" />1D / 4H 投影</label></div><button class="text-button @(drawing ? "accent" : "")" @onclick="() => drawing = !drawing">◇ @(drawing ? "取消选区" : "图上选区")</button></div>
+        @if (drawing) { <div class="drawing-hint">在图上依次点击两个价格位置，选定关注区边界。</div> }
+        <CandleChart Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Drawing="drawing" Scope="@view.Scope" RegionSelected="Picked" />
+        <div class="chart-caption"><span><span class="legend-dot amber"></span>虚线区域：你的关注区</span><span>时间：UTC+8 · 自动区域在确认后显示</span></div>
+    </section>
+    <section class="panel watch-panel"><div class="panel-heading"><h2>我的关注区 <span class="count-badge">@watches.Length</span></h2><button class="icon-button" aria-label="新增关注区" @onclick="NewWatch">＋</button></div>
+        <div class="watch-list">
+            @if (watches.Length == 0) { <div class="empty-state"><span>◇</span><b>选择你想等待的区域</b><p>点击自动标记旁的关注按钮，或手动填写边界。</p></div> }
+            @foreach (var w in watches)
+            {
+                <div class="watch-card @(!w.Enabled ? "paused" : "")"><div class="watch-top"><span class="pill @(w.Current.Bias == Bias.Bullish ? "green" : w.Current.Bias == Bias.Bearish ? "red" : "")">@w.Current.Timeframe · @LensFormat.BiasName(w.Current.Bias)</span><span class="watch-status @(w.Triggered ? "accent" : "")">@(w.Triggered ? "已到区" : !w.Enabled ? "已暂停" : view.Quote is not null && WatchRules.Inside(w.Current, view.Quote.Price) ? "当前在区内" : "等待到区")</span></div><h3>@w.Current.Name</h3><div class="watch-price mono">@LensFormat.Price(w.Current.Lower) <span>—</span> @LensFormat.Price(w.Current.Upper)</div><p>@w.Current.Notes</p>
+                    @if (w.Current.SourceZoneId is not null) { <small class="source-note">来源状态：@(view.Zones.FirstOrDefault(z => z.Id == w.Current.SourceZoneId) is { } origin ? LensFormat.Life(origin.Life) : "当前窗口未覆盖") · 手动边界保留</small> }
+                    <div class="watch-actions"><small>v@(w.Current.Revision) · 首次观测进入</small><div><button class="text-button" @onclick="() => EditWatch(w)">编辑</button><button class="text-button" @onclick="() => Market.ToggleWatchAsync(w.Id)">@(w.Enabled ? "暂停" : "启用")</button></div></div></div>
+            }
+        </div><div class="panel-tip">到区记录帮助你回看价格反应；确认条件与目标由你判断。</div>
+    </section>
+</div>
+<OrderFlowPanel Flow="view.Flow" />
+<div class="lower-grid">
+    <section class="panel"><div class="panel-heading"><h2>自动参考区域</h2><span class="subtle-label">当前周期 @(showHtf ? "+ 大周期" : "")</span></div><div class="table-wrap"><table><thead><tr><th>类型 / 周期</th><th>价格范围</th><th>状态</th><th>确认时间</th><th></th></tr></thead><tbody>
+        @foreach (var z in VisibleZones.Take(8)) { <tr><td><span class="pill @(z.Bias == Bias.Bullish ? "green" : "red")">@LensFormat.Kind(z.Kind)</span><span class="table-tf">@z.Timeframe</span></td><td class="mono">@LensFormat.Price(z.Lower) — @LensFormat.Price(z.Upper)</td><td>@LensFormat.Life(z.Life)</td><td class="muted">@LensFormat.Time(z.KnownAt)</td><td><button class="text-button accent" @onclick="() => FromZone(z)">＋ 关注</button></td></tr> }
+        @if (!VisibleZones.Any()) { <tr><td colspan="5" class="empty-cell">当前周期没有符合筛选的开放参考区域。可以手动建立关注区。</td></tr> }
+    </tbody></table></div></section>
+    <section class="panel"><div class="panel-heading"><h2>观察记录</h2><span class="subtle-label">证据随事件保存</span></div><div class="event-list">
+        @foreach (var a in alerts.Take(4)) { <button class="event-row" @onclick="() => selectedAlert = a"><span class="event-icon">↳</span><span><b>@a.Zone.Name</b><small>@LensFormat.Time(a.CreatedAt) · 观测价 <span class="mono">@LensFormat.Price(a.Price)</span></small></span><span class="push-right muted">查看 →</span></button> }
+        @if (alerts.Length == 0) { <div class="empty-state compact"><span>⌁</span><b>等待新的到区事件</b><p>@(view.Mode == "demo" ? "推进几根 K 线，观察演示关注区的首次触及。" : "持续运行程序以监控最新行情。")</p></div> }
+    </div><div class="report-action"><div><b>整理当前观察</b><small>规则报告 · 含缺失证据</small></div><button class="button small" @onclick="OpenReport">生成报告 ↗</button></div></section>
+</div>
+@if (editor is not null)
+{
+    <div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="关注区编辑"><div class="modal-heading"><div><span class="eyebrow">WATCH ZONE</span><h2>@(editingId is null ? "建立关注区" : "编辑关注区")</h2></div><button class="icon-button" aria-label="关闭编辑" @onclick="CloseEditor">×</button></div>
+        <form @onsubmit="SaveWatch" @onsubmit:preventDefault><label>名称<input required maxlength="100" @bind="editor.Name" /></label><div class="form-grid"><label>下边界<input type="number" step="0.1" min="0.1" required @bind="editor.Lower" /></label><label>上边界<input type="number" step="0.1" min="0.1" required @bind="editor.Upper" /></label><label>来源周期<select @bind="editor.Timeframe">@foreach (var tf in Timeframes.All) { <option>@tf</option> }</select></label><label>观察倾向<select @bind="editor.Bias"><option value="Neutral">待观察</option><option value="Bullish">看涨</option><option value="Bearish">看跌</option></select></label></div><label>关注原因<textarea rows="3" maxlength="2000" @bind="editor.Notes"></textarea></label>
+        <p class="form-note">保存后启用新版本的首次到区监控。旧版本与过去的提醒继续保留。</p>
+        @if (editingHistory.Length > 0) { <details><summary>已有版本记录（@editingHistory.Length）</summary>@foreach (var v in editingHistory) { <p class="muted">v@(v.Revision) · @v.Name · @LensFormat.Price(v.Lower)–@LensFormat.Price(v.Upper)</p> }</details> }
+        @if (formError is not null) { <div class="inline-error">@formError</div> }
+        <div class="modal-actions"><button type="button" class="button ghost" @onclick="CloseEditor">取消</button><button type="submit" class="button primary">保存并启用</button></div></form></section></div>
+}
+@if (selectedAlert is not null)
+{
+    <div class="modal-backdrop"><section class="modal wide" role="dialog" aria-modal="true" aria-label="提醒详情"><div class="modal-heading"><div><span class="eyebrow">EVENT SNAPSHOT · v@(selectedAlert.Revision)</span><h2>@selectedAlert.Zone.Name</h2></div><button class="icon-button" aria-label="关闭提醒" @onclick="() => selectedAlert = null">×</button></div><div class="snapshot-summary"><span>触发价格 <b class="mono">@LensFormat.Price(selectedAlert.Price)</b></span><span>@LensFormat.Time(selectedAlert.CreatedAt) · @selectedAlert.Transport</span></div><p>@selectedAlert.Summary</p><p class="muted">@selectedAlert.Zone.Notes</p><details><summary>查看保存的证据数据</summary><pre class="json-block">@Pretty(selectedAlert.EvidenceJson)</pre></details><div class="modal-actions"><button class="button" @onclick="ExportAlert">导出快照</button><a class="button primary" href="@("/journal?alert=" + Uri.EscapeDataString(selectedAlert.Id))">关联交易记录 →</a></div></section></div>
+}
+@if (report is not null)
+{
+    <div class="modal-backdrop"><section class="modal wide" role="dialog" aria-modal="true" aria-label="观察报告"><div class="modal-heading"><div><span class="eyebrow">OBSERVATION REPORT</span><h2>当前观察报告</h2></div><button class="icon-button" aria-label="关闭报告" @onclick="() => report = null">×</button></div><p class="muted">基于当前截止点的规则报告 · 可导出给智能体分析</p><h3>已观察到</h3><ul class="report-list">@foreach (var line in report.Observations) { <li>@line</li> }</ul><h3>尚缺证据</h3><ul class="report-list">@foreach (var line in report.Missing) { <li>@line</li> }</ul><h3>接下来观察</h3><ul class="report-list">@foreach (var line in report.NextSteps) { <li>@line</li> }</ul><div class="modal-actions"><button class="button primary" @onclick="ExportReport">导出分析 JSON</button></div></section></div>
+}
+@code {
+    private MarketView view = MarketView.Empty;
+    private WatchZone[] watches = [];
+    private AlertEvent[] alerts = [];
+    private string timeframe = "5m";
+    private bool showFvg = true, showOb = true, showLevels = false, showHtf, drawing, busy;
+    private WatchEditor? editor;
+    private string? editingId, editorScope, formError;
+    private int? editingRevision;
+    private WatchVersion[] editingHistory = [];
+    private AlertEvent? selectedAlert;
+    private AnalysisPacket? report;
+    private long lastRender;
+    private Candle[] CurrentCandles => view.Candles.TryGetValue(timeframe, out var bars) ? bars : [];
+    private IEnumerable<DetectedZone> VisibleZones => view.Zones.Where(z => z.Life is ZoneLife.Active or ZoneLife.Touched)
+        .Where(z => z.Timeframe == timeframe || showHtf && z.Timeframe is "1D" or "4H")
+        .Where(z => z.Kind == ZoneKind.Fvg ? showFvg : showOb).OrderByDescending(z => z.KnownAt);
+    private DetectedZone[] ChartZones => VisibleZones.Take(24).ToArray();
+    protected override void OnInitialized() { Reload(); Market.Changed += Changed; }
+    private void Reload() { var oldScope = view.Scope; view = Market.View; watches = Store.Watches(view.Scope); alerts = Store.Alerts(view.Scope); if (oldScope != view.Scope) { CloseEditor(); selectedAlert = null; report = null; } }
+    private void Changed()
+    {
+        var now = Environment.TickCount64;
+        if (view.Mode == "live" && now - lastRender < 400 && view.Scope == Market.View.Scope) return;
+        lastRender = now; _ = InvokeAsync(() => { Reload(); StateHasChanged(); });
+    }
+    private async Task Step(int count) { busy = true; try { await Market.StepAsync(count); Reload(); } finally { busy = false; } }
+    private async Task NewReplay() { await Market.NewReplayAsync(); Reload(); Snack.Add("已开启新的回放工作区；历史事件仍保存在本地。", Severity.Info); }
+    private void NewWatch() { editingId = null; editingRevision = null; editingHistory = []; editorScope = view.Scope; formError = null; var price = view.Quote?.Price ?? 67000; editor = new() { Lower = price - 150, Upper = price - 50, Timeframe = timeframe }; }
+    private void FromZone(DetectedZone zone) { NewWatch(); editor = new() { Name = zone.Timeframe + " " + LensFormat.Kind(zone.Kind) + " 观察", Lower = zone.Lower, Upper = zone.Upper, Timeframe = zone.Timeframe, Bias = zone.Bias, Notes = "参考 " + zone.Algorithm + "；等待到区后观察局部反应。", SourceId = zone.Id }; }
+    private void EditWatch(WatchZone w) { editingId = w.Id; editingRevision = w.Current.Revision; editingHistory = [.. w.History, w.Current]; editorScope = view.Scope; formError = null; var v = w.Current; editor = new() { Name = v.Name, Lower = v.Lower, Upper = v.Upper, Timeframe = v.Timeframe, Bias = v.Bias, Notes = v.Notes, SourceId = v.SourceZoneId }; }
+    private void Picked((decimal Lower, decimal Upper) region) { drawing = false; NewWatch(); editor!.Lower = region.Lower; editor.Upper = region.Upper; }
+    private void CloseEditor() { editor = null; formError = null; }
+    private async Task SaveWatch()
+    {
+        try { if (editorScope != Market.View.Scope) throw new ArgumentException("工作区已变化，请重新建立关注区。"); var e = editor!; await Market.SaveWatchAsync(editingId, editingRevision, new(0, e.Name, e.Lower, e.Upper, e.Timeframe, e.Bias, e.Notes, e.SourceId, default)); CloseEditor(); Reload(); Snack.Add("关注区已保存，首次到区监控已启用。", Severity.Success); }
+        catch (ArgumentException ex) { formError = ex.Message; }
+    }
+    private void OpenReport() => report = AnalysisReport.Build(view, watches);
+    private static string Pretty(string value) { using var doc = System.Text.Json.JsonDocument.Parse(value); return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }); }
+    private async Task Download(string name, string json) { await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/files.js"); await module.InvokeVoidAsync("download", name, Pretty(json)); }
+    private Task ExportAlert() => Download("btclens-event.json", JsonCodec.Write(selectedAlert));
+    private Task ExportReport() => Download("btclens-analysis.json", JsonCodec.Write(report));
+    public void Dispose() => Market.Changed -= Changed;
+    private sealed class WatchEditor { public string Name { get; set; } = "我的关注区"; public decimal Lower { get; set; } public decimal Upper { get; set; } public string Timeframe { get; set; } = "5m"; public Bias Bias { get; set; } public string Notes { get; set; } = ""; public string? SourceId { get; set; } }
+}

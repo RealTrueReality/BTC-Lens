@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BtcLens.Application/BtcLens.Application.csproj" />
+    <Project Path="src/BtcLens.Core/BtcLens.Core.csproj" />
+    <Project Path="src/BtcLens.Infrastructure/BtcLens.Infrastructure.csproj" />
+    <Project Path="src/BtcLens.Web/BtcLens.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BtcLens.Tests/BtcLens.Tests.csproj" />
+  </Folder>
+</Solution>

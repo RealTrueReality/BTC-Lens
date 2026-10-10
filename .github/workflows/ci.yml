@@ -1,0 +1,47 @@
+name: Build and verify
+on:
+  push:
+  pull_request:
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: ./tools/Verify.ps1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install chromium
+      - name: Browser workflow
+        shell: pwsh
+        env:
+          BROWSER_CHANNEL: chromium
+          BTC_LENS_URL: http://127.0.0.1:5081
+        run: |
+          $env:DatabasePath = Join-Path $env:RUNNER_TEMP 'btclens-browser.db'
+          Push-Location src/BtcLens.Web
+          $server = Start-Process dotnet -ArgumentList @('bin/Release/net10.0/BtcLens.Web.dll','--urls','http://127.0.0.1:5081') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP 'btclens-server.log') -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'btclens-server-errors.log')
+          Pop-Location
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 60; $i++) {
+              try { Invoke-RestMethod http://127.0.0.1:5081/healthz -TimeoutSec 1 | Out-Null; $ready=$true; break } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (!$ready) { throw 'Server did not start.' }
+            pnpm test:browser
+            if ($LASTEXITCODE -ne 0) { throw 'Browser workflow failed.' }
+          } finally { Stop-Process -Id $server.Id -ErrorAction SilentlyContinue }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-results
+          path: test-results/screenshots/

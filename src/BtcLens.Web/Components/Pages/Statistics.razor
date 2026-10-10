@@ -1,0 +1,33 @@
+@page "/statistics"
+@implements IDisposable
+@inject MarketEngine Market
+@inject ILensStore Store
+<PageTitle>复盘统计 · BTC Lens</PageTitle>
+<div class="page-heading"><div><div class="eyebrow">LEARN FROM YOUR OWN EXECUTION</div><h1>复盘统计<span class="title-dot">.</span></h1><p>从记录中看执行，让下一次判断更清楚。</p></div><span class="pill @(mode == "demo" ? "amber" : "green")">@(mode == "demo" ? "演示数据" : "个人交易")</span></div>
+<div class="context-strip"><span>统计覆盖：@stats.Closed 笔已平仓交易，其中 @stats.CostComplete 笔成本齐全。</span><span class="push-right">@(mode == "demo" ? "合成示例 · 非真实业绩" : "累计交易盈亏 · 不含账户出入金")</span></div>
+<div class="metric-grid"><div class="metric"><span class="metric-label">累计已实现净盈亏</span><div class="metric-number mono @(stats.NetPnl > 0 ? "positive" : stats.NetPnl < 0 ? "negative" : "")">@LensFormat.Money(stats.NetPnl)<small>USDT</small></div><span class="metric-foot">仅统计成本齐全的已平仓交易</span></div><div class="metric"><span class="metric-label">胜率</span><div class="metric-number mono">@(stats.WinRate?.ToString("P1") ?? "—")</div><span class="metric-foot">@stats.Wins 盈利 / @stats.Losses 亏损 / @stats.Breakeven 持平</span></div><div class="metric"><span class="metric-label">平均净 R</span><div class="metric-number mono">@(stats.AverageR?.ToString("0.00") ?? "—")<small>R</small></div><span class="metric-foot">需同时具有成本和初始止损</span></div><div class="metric"><span class="metric-label">复盘完成</span><div class="metric-number mono">@trades.Count(t => t.Closed && !string.IsNullOrWhiteSpace(t.Review))<small>/ @stats.Closed 笔</small></div><span class="metric-foot">给每次平仓留下一条发现</span></div></div>
+<div class="stats-grid"><section class="panel"><div class="panel-heading"><h2>累计交易盈亏</h2><span class="subtle-label">按平仓顺序 · USDT</span></div>
+@if (complete.Length > 0)
+{
+    <div class="pnl-chart"><svg viewBox="0 0 720 250" role="img" aria-label="累计已实现交易盈亏曲线"><defs><linearGradient id="pnl-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#59b99e" stop-opacity=".24" /><stop offset="100%" stop-color="#59b99e" stop-opacity="0" /></linearGradient></defs>@for (var i = 0; i < 4; i++) { <line x1="20" x2="690" y1="@(30 + i * 60)" y2="@(30 + i * 60)" stroke="#263138" stroke-dasharray="3 5" /> }<polygon points="@AreaPoints" fill="url(#pnl-fill)" /><polyline points="@LinePoints" fill="none" stroke="#59b99e" stroke-width="2.5" stroke-linejoin="round" />@for (var i = 0; i < cumulative.Length; i++) { <circle cx="@X(i)" cy="@Y(cumulative[i])" r="4" fill="#59b99e"><title>@(i == 0 ? "起点 0 USDT" : LensFormat.Time(complete[i - 1].ExitTime!.Value) + " / 累计 " + LensFormat.Money(cumulative[i]) + " USDT")</title></circle> }</svg><div class="chart-caption"><span>起点 0</span><span>累计 @LensFormat.Money(stats.NetPnl) USDT · @complete.Length 笔</span></div></div>
+}
+else { <div class="empty-state"><span>▥</span><b>等待可计算的已平仓交易</b><p>补齐平仓价、手续费和资金费后，这里会显示累计盈亏。</p></div> }
+</section><section class="panel"><div class="panel-heading"><h2>复盘标签</h2><span class="subtle-label">交易笔数</span></div><div class="tag-stat-list">@foreach (var item in Tags) { <div><span>@item.Key</span><b class="mono">@item.Value</b><div class="tag-bar"><i style="@("width:" + (100 * item.Value / Math.Max(1, trades.Length)) + "%")"></i></div></div> }@if (!Tags.Any()) { <p class="muted">为交易添加标签，观察反复出现的执行习惯。</p> }</div></section></div>
+<section class="panel"><div class="panel-heading"><h2>计算口径</h2><span class="subtle-label">BTC-USDT-SWAP · 线性合约</span></div><div class="formula-grid"><div><span class="eyebrow">REALIZED PNL</span><h3>净盈亏</h3><p>方向 ×（平仓价 − 开仓价）× BTC 数量<br />− 手续费 ＋ 有符号资金费</p><small>资金费收入为正、支出为负。未知成本留空。</small></div><div><span class="eyebrow">INITIAL RISK</span><h3>净 R 倍数</h3><p>净盈亏 ÷ 初始风险金额<br />初始风险 = |开仓价 − 初始止损| × BTC 数量</p><small>初始风险保存后固定；杠杆不额外乘入盈亏公式。</small></div></div></section>
+@code {
+    private string mode = "demo";
+    private Trade[] trades = [], complete = [];
+    private JournalStats stats = TradeMath.Summarize([]);
+    private decimal[] cumulative = [0];
+    private Dictionary<string, int> Tags => trades.SelectMany(t => t.Tags.Split([',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct()).GroupBy(t => t).OrderByDescending(g => g.Count()).ToDictionary(g => g.Key, g => g.Count());
+    private decimal bottom => Math.Min(0, cumulative.Min()) - 1;
+    private decimal top => Math.Max(0, cumulative.Max()) + 1;
+    private string X(int i) => (25m + 650m * i / Math.Max(1, cumulative.Length - 1)).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+    private string Y(decimal value) => (215m - 175m * (value - bottom) / (top - bottom)).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+    private string LinePoints => string.Join(" ", cumulative.Select((v, i) => X(i) + "," + Y(v)));
+    private string AreaPoints => "25,230 " + LinePoints + " " + X(cumulative.Length - 1) + ",230";
+    protected override void OnInitialized() { Reload(); Market.Changed += Changed; }
+    private void Reload() { mode = Market.View.Mode; trades = Store.Trades(mode); stats = TradeMath.Summarize(trades); complete = trades.Where(t => t.Closed && TradeMath.Calculate(t).Net.HasValue).OrderBy(t => t.ExitTime).ToArray(); var sum = 0m; cumulative = [0, .. complete.Select(t => sum += TradeMath.Calculate(t).Net!.Value)]; }
+    private void Changed() { if (mode != Market.View.Mode) _ = InvokeAsync(() => { Reload(); StateHasChanged(); }); }
+    public void Dispose() => Market.Changed -= Changed;
+}

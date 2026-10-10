@@ -1,0 +1,45 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+<div class="chart-host" @ref="host"><div class="chart-loading">正在绘制行情…</div></div>
+@code {
+    [Parameter] public Candle[] Candles { get; set; } = [];
+    [Parameter] public DetectedZone[] Zones { get; set; } = [];
+    [Parameter] public WatchZone[] Watches { get; set; } = [];
+    [Parameter] public KeyLevel[] Levels { get; set; } = [];
+    [Parameter] public bool ShowLevels { get; set; } = true;
+    [Parameter] public bool Drawing { get; set; }
+    [Parameter] public string Scope { get; set; } = "";
+    [Parameter] public EventCallback<(decimal Lower, decimal Upper)> RegionSelected { get; set; }
+    private ElementReference host;
+    private IJSObjectReference? module;
+    private IJSObjectReference? chart;
+    private DotNetObjectReference<CandleChart>? reference;
+    private string identity = "";
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (firstRender)
+            {
+                module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/chart.js");
+                reference = DotNetObjectReference.Create(this);
+                chart = await module.InvokeAsync<IJSObjectReference>("create", host, reference);
+            }
+            if (chart is null) return;
+            var nextIdentity = Scope + ":" + Candles.FirstOrDefault()?.Timeframe;
+            var reset = identity != nextIdentity; identity = nextIdentity;
+            await chart.InvokeVoidAsync("update", Candles.Select(c => new { time = c.OpenTime / 1000, open = c.Open, high = c.High, low = c.Low, close = c.Close, volume = c.Volume, confirmed = c.Confirmed }),
+                Zones.Select(z => new { id = z.Id, lower = z.Lower, upper = z.Upper, from = z.KnownAt / 1000, kind = LensFormat.Kind(z.Kind), bias = z.Bias.ToString(), label = z.Timeframe + " " + LensFormat.Kind(z.Kind) }),
+                Watches.Where(w => w.Enabled).Select(w => new { id = w.Id, lower = w.Current.Lower, upper = w.Current.Upper, from = w.Current.CreatedAt.ToUnixTimeMilliseconds() / 1000, label = w.Current.Name }),
+                ShowLevels ? Levels.Select(l => new { name = l.Name, price = l.Price }).ToArray() : [], Drawing, reset);
+        }
+        catch (JSDisconnectedException) { }
+    }
+    [JSInvokable] public Task Picked(double first, double second) => RegionSelected.InvokeAsync(((decimal)Math.Round(Math.Min(first, second), 1), (decimal)Math.Round(Math.Max(first, second), 1)));
+    public async ValueTask DisposeAsync()
+    {
+        try { if (chart is not null) { await chart.InvokeVoidAsync("dispose"); await chart.DisposeAsync(); } if (module is not null) await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+        reference?.Dispose();
+    }
+}

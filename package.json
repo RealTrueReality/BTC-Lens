@@ -1,0 +1,6 @@
+{
+  "name": "btc-lens-browser-checks",
+  "private": true,
+  "scripts": { "test:browser": "node tools/browser-smoke.cjs", "test:order-flow": "node tools/check-order-flow.cjs" },
+  "devDependencies": { "playwright": "1.62.1" }
+}
