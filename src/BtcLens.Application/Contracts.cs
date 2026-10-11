@@ -18,6 +18,7 @@ public interface ILensStore
     int ImportTrades(IReadOnlyList<Trade> trades);
     void SaveCandles(string scope, IEnumerable<Candle> candles);
     Candle[] ReadCandles(string scope);
+    Candle[] ReadCandles(string scope, long start, long end);
     SavedProfile[] Profiles(string scope);
     void SaveProfile(SavedProfile profile);
     bool SetProfileState(string scope, string id, bool visible, long? deletedAt);

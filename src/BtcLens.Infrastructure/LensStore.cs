@@ -14,6 +14,8 @@ public sealed class LensStore : ILensStore, IDisposable
         db = new(new ConnectionConfig { ConnectionString = $"Data Source={path};Pooling=False", DbType = DbType.Sqlite,
             IsAutoCloseConnection = true, InitKeyType = InitKeyType.Attribute });
         db.CodeFirst.InitTables<SettingRow, WatchRow, AlertRow, TradeRow, CandleRow>();
+        db.Ado.ExecuteCommand("UPDATE candle_cache SET OpenTime = CAST(json_extract(Json,'$.openTime') AS INTEGER) WHERE OpenTime IS NULL");
+        db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_candle_scope_time ON candle_cache(Scope,OpenTime)");
         db.CodeFirst.InitTables<FlowSegmentRow, CvdRow, CapturedTradeRow, OpenInterestRow>();
         db.CodeFirst.InitTables<ProfileRowEntity>();
         db.CodeFirst.InitTables<DrawingRowEntity>();
@@ -124,13 +126,15 @@ public sealed class LensStore : ILensStore, IDisposable
     }
     public void SaveCandles(string scope, IEnumerable<Candle> candles)
     {
-        var rows = candles.Select(c => new CandleRow { Id = $"{scope}:{c.Instrument}:{c.Timeframe}:{c.OpenTime}", Scope = scope, Json = JsonCodec.Write(c) }).ToArray();
+        var rows = candles.Select(c => new CandleRow { Id = $"{scope}:{c.Instrument}:{c.Timeframe}:{c.OpenTime}", Scope = scope, OpenTime = c.OpenTime, Json = JsonCodec.Write(c) }).ToArray();
         if (rows.Length == 0) return;
         lock (sync) db.Storageable(rows).ExecuteCommand();
     }
     private static WatchRow Watch(WatchZone w) => new() { Id = w.Id, Scope = w.Scope, Json = JsonCodec.Write(w) };
     public Candle[] ReadCandles(string scope)
     { lock (sync) return db.Queryable<CandleRow>().Where(x => x.Scope == scope).ToList().Select(x => JsonCodec.Read<Candle>(x.Json)).OrderBy(x => x.OpenTime).ToArray(); }
+    public Candle[] ReadCandles(string scope, long start, long end)
+    { lock (sync) return db.Queryable<CandleRow>().Where(x => x.Scope == scope && x.OpenTime >= start && x.OpenTime < end).OrderBy(x => x.OpenTime).ToList().Select(x => JsonCodec.Read<Candle>(x.Json)).ToArray(); }
     public SavedProfile[] Profiles(string scope)
     { lock (sync) return db.Queryable<ProfileRowEntity>().Where(x => x.Scope == scope).OrderByDescending(x => x.Timestamp).ToList().Select(x => JsonCodec.Read<SavedProfile>(x.Json)).Where(p => p.DeletedAt is null).ToArray(); }
     public void SaveProfile(SavedProfile profile)
@@ -247,7 +251,7 @@ public sealed class AlertRow { [SugarColumn(IsPrimaryKey = true)] public string 
 [SugarTable("trades")]
 public sealed class TradeRow { [SugarColumn(IsPrimaryKey = true)] public string Id { get; set; } = ""; public string Mode { get; set; } = ""; public long Timestamp { get; set; } [SugarColumn(ColumnDataType = "text")] public string Json { get; set; } = ""; }
 [SugarTable("candle_cache")]
-public sealed class CandleRow { [SugarColumn(IsPrimaryKey = true)] public string Id { get; set; } = ""; public string Scope { get; set; } = ""; [SugarColumn(ColumnDataType = "text")] public string Json { get; set; } = ""; }
+public sealed class CandleRow { [SugarColumn(IsPrimaryKey = true)] public string Id { get; set; } = ""; public string Scope { get; set; } = ""; public long? OpenTime { get; set; } [SugarColumn(ColumnDataType = "text")] public string Json { get; set; } = ""; }
 
 [SugarTable("flow_segments")]
 public sealed class FlowSegmentRow { [SugarColumn(IsPrimaryKey = true)] public string Id { get; set; } = ""; public long Timestamp { get; set; } [SugarColumn(ColumnDataType = "text")] public string Json { get; set; } = ""; }

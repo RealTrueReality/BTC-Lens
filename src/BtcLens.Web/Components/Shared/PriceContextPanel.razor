@@ -1,6 +1,7 @@
 @inject MarketEngine Market
 @inject IJSRuntime JS
 @inject ISnackbar Snack
+@implements IDisposable
 <section class="panel price-context-panel" data-testid="price-context">
     <div class="panel-heading"><div><span class="eyebrow">PRICE &amp; VOLUME CONTEXT</span><h2>成交量分布与 VWAP</h2></div><label class="context-timezone">VWAP 重置时区<select aria-label="VWAP 重置时区" value="@View.PriceContext.OffsetHours" @onchange="ChangeOffset"><option value="8">北京时间 UTC+8</option><option value="0">UTC</option></select></label></div>
     <div class="vwap-grid">
@@ -35,10 +36,11 @@
 @if (form is not null)
 {
     <div class="modal-backdrop"><section class="modal wide" role="dialog" aria-modal="true" aria-label="成交量选区编辑"><div class="modal-heading"><div><span class="eyebrow">FIXED RANGE · 5M APPROXIMATION</span><h2>保存成交量选区</h2></div><button class="icon-button" aria-label="关闭成交量选区" @onclick="Close">×</button></div>
-        <form @onsubmit="Save" @onsubmit:preventDefault><label>选区名称<input required maxlength="100" @bind="form.Name" /></label><div class="form-grid"><label>开始时间（北京时间，包含）<input type="datetime-local" required step="300" @bind="form.Start" /></label><label>结束时间（北京时间，不含）<input type="datetime-local" required step="300" @bind="form.End" /></label><label>成交量分布行数<input type="number" min="8" max="120" required @bind="form.Rows" /></label><label>价值区比例（%）<input type="number" min="1" max="100" required @bind="form.Area" /></label></div><p class="form-note">当前可用 5m 覆盖：@(View.ContextCandles.Length == 0 ? "等待数据" : LensFormat.Time(View.ContextCandles[0].OpenTime) + " 至 " + LensFormat.Time(View.ContextCandles[^1].CloseTime))。只计算当前已收盘 K 线；缺失部分会单独标记。</p>
+        <form @onsubmit="Save" @onsubmit:preventDefault><label>选区名称<input required maxlength="100" disabled="@busy" @bind="form.Name" /></label><div class="form-grid"><label>开始时间（北京时间，包含）<input type="datetime-local" required step="300" disabled="@busy" @bind="form.Start" @bind:after="ResetPreview" /></label><label>结束时间（北京时间，不含）<input type="datetime-local" required step="300" disabled="@busy" @bind="form.End" @bind:after="ResetPreview" /></label><label>成交量分布行数<input type="number" min="8" max="120" required disabled="@busy" @bind="form.Rows" @bind:after="ResetPreview" /></label><label>价值区比例（%）<input type="number" min="1" max="100" required disabled="@busy" @bind="form.Area" @bind:after="ResetPreview" /></label></div><p class="form-note">预览或保存时，自动从 OKX 补取所选区间缺失的 5m 历史，已下载数据会保留供下次复用。支持超过 40 天的选区；开始和结束时间需对齐 5 分钟，且不能晚于当前已收盘时间。</p>
+        @if (busy && loadProgress is { } loading) { <div class="profile-preview" data-testid="profile-load" role="status" aria-live="polite">@loading.Status<p>已加载 @loading.Loaded / @loading.Expected 根 · 已请求 @loading.Pages 页</p><progress value="@loading.Loaded" max="@Math.Max(1, loading.Expected)" aria-label="历史加载进度" style="width:100%"></progress></div> }
         @if (preview is not null) { <div class="profile-preview" data-testid="profile-preview">POC <b>@LensFormat.Price(preview.Poc)</b> · VAH <b>@LensFormat.Price(preview.Vah)</b> · VAL <b>@LensFormat.Price(preview.Val)</b><p>覆盖 @preview.Coverage.Observed / @preview.Coverage.Expected 根，缺失 @preview.Coverage.Missing 根；@preview.TotalBtc.ToString("0.########") BTC。@(preview.Coverage.Complete ? "选区覆盖完整。" : "数据不完整，保存结果仅代表已覆盖部分。")</p></div> }
         @if (error is not null) { <p class="inline-error">@error</p> }
-        <div class="modal-actions"><button type="button" class="button" @onclick="Preview">预览计算</button><button type="submit" class="button primary">保存选区</button></div></form></section></div>
+        <div class="modal-actions">@if (busy) { <button type="button" class="button" @onclick="CancelLoad">取消加载</button> }<button type="button" class="button" disabled="@busy" @onclick="Preview">@(busy ? "正在加载…" : "预览计算")</button><button type="submit" class="button primary" disabled="@(busy || preview is { Poc: null })">@(preview is { Coverage.Complete: false } ? "保存已覆盖部分" : "保存选区")</button></div></form></section></div>
 }
 @code {
     [Parameter] public MarketView View { get; set; } = MarketView.Empty;
@@ -52,6 +54,9 @@
     private RangeForm? form;
     private ProfileResult? preview;
     private string? error, formScope;
+    private bool busy;
+    private ProfileLoadProgress? loadProgress;
+    private CancellationTokenSource? activeLoad;
     private string previousScope = "";
     protected override void OnParametersSet() { if (previousScope != View.Scope) { previousScope = View.Scope; Close(); } }
     private bool Usable(VwapResult v) => v.Value is not null && v.Coverage.Complete && v.KnownAt <= View.Cutoff && View.Cutoff - v.KnownAt < 600_000 && v.Anchor == PriceContextRules.Anchor(View.Cutoff, v.Period, v.OffsetHours);
@@ -73,24 +78,46 @@
     }
     public void OpenRange(long start, long end)
     {
+        Close();
         formScope = View.Scope; preview = null; error = null;
         form = new() { Start = Local(start), End = Local(Math.Min(end, View.Cutoff / PriceContextRules.Step * PriceContextRules.Step)) };
         StateHasChanged();
     }
-    private void Close() { form = null; preview = null; error = null; }
+    private void Close() { activeLoad?.Cancel(); activeLoad = null; busy = false; loadProgress = null; form = null; ResetPreview(); }
+    private void ResetPreview() { preview = null; error = null; }
+    private void CancelLoad() => activeLoad?.Cancel();
+    public void Dispose() => Close();
     private static DateTime Local(long time) => DateTimeOffset.FromUnixTimeMilliseconds(time).ToOffset(TimeSpan.FromHours(8)).DateTime;
     private static long Timestamp(DateTime time) => new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Unspecified), TimeSpan.FromHours(8)).ToUnixTimeMilliseconds();
-    private void Preview()
+    private Task Preview() => Compute(false);
+    private Task Save() => Compute(true);
+    private async Task Compute(bool save)
     {
-        try { var f = form!; preview = PriceContextRules.Profile(View.ContextCandles, Timestamp(f.Start), Timestamp(f.End), View.Cutoff,
-            View.Instrument ?? throw new ArgumentException("等待合约元数据。"), f.Rows, f.Area); error = null; }
-        catch (ArgumentException ex) { error = ex.Message; preview = null; }
-    }
-    private async Task Save()
-    {
-        try { var f = form!; var saved = await Market.SaveProfileAsync(f.Name, Timeframe, Timestamp(f.Start), Timestamp(f.End), f.Rows, f.Area, formScope!);
-            await SelectedChanged.InvokeAsync(saved.Id); Close(); Snack.Add("已保存选区与原始 5m 证据。", Severity.Success); }
-        catch (ArgumentException ex) { error = ex.Message; }
+        if (busy || form is null) return;
+        var f = form; var start = Timestamp(f.Start); var end = Timestamp(f.End); var rows = f.Rows; var area = f.Area;
+        var scope = formScope!; var timeframe = Timeframe; var allowPartial = preview is { Coverage.Complete: false };
+        using var request = new CancellationTokenSource(); activeLoad = request; busy = true; error = null; preview = null;
+        loadProgress = new(0, 0, 0, "正在检查选区与本地缓存");
+        var progress = new Progress<ProfileLoadProgress>(p => { _ = InvokeAsync(() => {
+            if (activeLoad == request && !request.IsCancellationRequested) { loadProgress = p; StateHasChanged(); }
+        }); });
+        try
+        {
+            var result = await Market.PreviewProfileAsync(start, end, rows, area, scope, progress, request.Token);
+            request.Token.ThrowIfCancellationRequested();
+            if (activeLoad != request || form != f) return;
+            preview = result;
+            if (!save) return;
+            if (!result.Coverage.Complete && !allowPartial) { error = "所选区间仍有缺失数据，请检查预览；可以重试补取，或选择「保存已覆盖部分」。"; return; }
+            var saved = await Market.SaveProfileAsync(f.Name, timeframe, start, end, rows, area, scope, progress, request.Token, allowIncomplete: allowPartial);
+            await SelectedChanged.InvokeAsync(saved.Id); Close(); Snack.Add("已保存选区与原始 5m 证据。", Severity.Success);
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested)
+        { if (activeLoad == request) error = "已取消加载，已下载数据仍在本地；再次预览会继续补取。"; }
+        catch (ArgumentException ex) { if (activeLoad == request) error = ex.Message; }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException)
+        { if (activeLoad == request) error = "历史数据补取失败，已下载部分仍保留；请重试。" + (ex is InvalidDataException ? ex.Message : ""); }
+        finally { if (activeLoad == request) { activeLoad = null; busy = false; } }
     }
     private Task FromProfile(SavedProfile p, string role, decimal price) => LevelPicked.InvokeAsync((new("profile", p.Id, p.Name + " · " + role, price, p.CreatedAt, p.Result.Algorithm, p.Result.SourceHash), p.DisplayTimeframe));
     private Task FromVwap(VwapResult v) => LevelPicked.InvokeAsync((new("vwap", $"vwap:{View.Scope}:{v.Period}:{v.OffsetHours}:{v.KnownAt}", PriceContextRules.PeriodName(v.Period) + " VWAP", v.Value!.Value, v.KnownAt, PriceContextRules.VwapVersion, v.SourceHash), Timeframe));

@@ -9,6 +9,7 @@ public sealed class MarketEngine
     private readonly OkxClient okx;
     private readonly OrderFlowEngine? orderFlow;
     private readonly TimeProvider clock;
+    private readonly ProfileHistoryLoader profileHistory;
     private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Candle[] fixture;
@@ -23,9 +24,10 @@ public sealed class MarketEngine
     public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null, TimeProvider? timeProvider = null, bool useFixture = false)
     {
         this.store = store; this.okx = okx; this.orderFlow = orderFlow; clock = timeProvider ?? TimeProvider.System;
+        profileHistory = new(store, okx);
         this.useFixture = useFixture; fixture = useFixture ? DemoMarket.Generate() : [];
         var earliest = clock.GetUtcNow().AddDays(-40).ToUnixTimeMilliseconds();
-        contextCache = store.ReadCandles("live:analysis").Where(c => c.OpenTime >= earliest).ToArray();
+        contextCache = store.ReadCandles("live:analysis", earliest, Now).ToArray();
         if (orderFlow is not null) orderFlow.Changed += Notify;
         if (!useFixture) { view = Enrich(LiveEmpty() with { ContextCandles = contextCache }); store.SetSetting("market-mode", "live"); return; }
         var session = store.GetSetting("demo-session") ?? Guid.NewGuid().ToString("N")[..10];
@@ -205,22 +207,43 @@ public sealed class MarketEngine
         finally { gate.Release(); }
         Notify();
     }
-    public async Task<SavedProfile> SaveProfileAsync(string name, string timeframe, long start, long end, int rows, decimal area, string expectedScope)
+    private async Task<(MarketView State, Candle[] Bars)> PrepareProfileAsync(long start, long end, int rows, decimal area,
+        string expectedScope, IProgress<ProfileLoadProgress>? progress, CancellationToken ct)
+    {
+        var state = View;
+        if (state.Scope != expectedScope) throw new ArgumentException("工作区已变化，请重新选择范围。");
+        PriceContextRules.ValidateProfileRange(start, end, state.Cutoff, rows, area);
+        if (state.Instrument is null) throw new ArgumentException("等待合约元数据。");
+        var bars = state.Mode == "live" ? await profileHistory.LoadAsync(start, end, state.Cutoff, state.ContextCandles, progress, ct)
+            : PriceContextRules.ClosedBars(state.ContextCandles, start, end, state.Cutoff);
+        ct.ThrowIfCancellationRequested();
+        if (View.Scope != expectedScope) throw new ArgumentException("工作区已变化，请重新选择范围。");
+        return (state, bars);
+    }
+    public async Task<ProfileResult> PreviewProfileAsync(long start, long end, int rows, decimal area, string expectedScope,
+        IProgress<ProfileLoadProgress>? progress = null, CancellationToken ct = default)
+    {
+        var (state, bars) = await PrepareProfileAsync(start, end, rows, area, expectedScope, progress, ct);
+        return await Task.Run(() => PriceContextRules.Profile(bars, start, end, state.Cutoff, state.Instrument!, rows, area), ct);
+    }
+    public async Task<SavedProfile> SaveProfileAsync(string name, string timeframe, long start, long end, int rows, decimal area, string expectedScope,
+        IProgress<ProfileLoadProgress>? progress = null, CancellationToken ct = default, bool allowIncomplete = false)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 100 || !Timeframes.All.Contains(timeframe)) throw new ArgumentException("填写选区名称和有效周期。");
-        await gate.WaitAsync();
+        var (state, bars) = await PrepareProfileAsync(start, end, rows, area, expectedScope, progress, ct);
+        var result = await Task.Run(() => PriceContextRules.Profile(bars, start, end, state.Cutoff, state.Instrument!, rows, area), ct);
+        if (result.Poc is null) throw new ArgumentException("所选范围没有可用的已收盘成交量，请检查数据覆盖。");
+        if (!result.Coverage.Complete && !allowIncomplete) throw new ArgumentException($"选区仍缺 {result.Coverage.Missing} 根 K 线，请先预览并检查覆盖情况。");
+        await gate.WaitAsync(ct);
         SavedProfile saved;
         try
         {
             if (view.Scope != expectedScope) throw new ArgumentException("工作区已变化，请重新选择范围。");
-            var state = View;
-            var result = PriceContextRules.Profile(state.ContextCandles, start, end, state.Cutoff,
-                state.Instrument ?? throw new ArgumentException("等待合约元数据。"), rows, area);
-            if (result.Poc is null) throw new ArgumentException("所选范围没有可用的已收盘成交量，请检查数据覆盖。");
-            saved = new(Guid.NewGuid().ToString("N"), state.Scope, name.Trim(), timeframe, state.Cutoff, result,
-                PriceContextRules.ClosedBars(state.ContextCandles, start, end, state.Cutoff));
+            ct.ThrowIfCancellationRequested();
+            saved = new(Guid.NewGuid().ToString("N"), state.Scope, name.Trim(), timeframe, View.Cutoff, result,
+                bars);
             store.SaveProfile(saved);
-            view = Enrich(view with { Cutoff = state.Cutoff });
+            view = Enrich(view with { Cutoff = View.Cutoff });
         }
         finally { gate.Release(); }
         Notify(); return saved;

@@ -9,6 +9,7 @@ namespace BtcLens.Infrastructure;
 
 public sealed class OkxClient(HttpClient http)
 {
+    private readonly SemaphoreSlim historyGate = new(1, 1);
     public async Task<InstrumentInfo> InstrumentAsync(CancellationToken ct)
     {
         using var doc = await Get("api/v5/public/instruments?instType=SWAP&instId=BTC-USDT-SWAP", ct);
@@ -23,8 +24,19 @@ public sealed class OkxClient(HttpClient http)
     }
     public async Task<Candle[]> HistoryCandlesAsync(long after, CancellationToken ct)
     {
-        using var doc = await Get($"api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=5m&limit=300&after={after}", ct);
-        return ParseCandles(doc.RootElement.GetProperty("data"), "5m");
+        await historyGate.WaitAsync(ct);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            using var doc = await Get($"api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=5m&limit=300&after={after}", ct, allowEmpty: true);
+            return ParseCandles(doc.RootElement.GetProperty("data"), "5m");
+        }
+        finally
+        {
+            var delay = TimeSpan.FromMilliseconds(200) - System.Diagnostics.Stopwatch.GetElapsedTime(started);
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, CancellationToken.None);
+            historyGate.Release();
+        }
     }
     private static Candle[] ParseCandles(JsonElement data, string timeframe) => data.EnumerateArray().Select(row => new Candle("BTC-USDT-SWAP", timeframe,
             long.Parse(row[0].GetString()!, CultureInfo.InvariantCulture), Decimal(row[1]), Decimal(row[2]), Decimal(row[3]), Decimal(row[4]), Decimal(row[5]), row[8].GetString() == "1"))
@@ -107,13 +119,13 @@ public sealed class OkxClient(HttpClient http)
         }
         finally { heartbeatCts.Cancel(); socket.Abort(); try { await heartbeat; } catch (OperationCanceledException) { } }
     }
-    private async Task<JsonDocument> Get(string relative, CancellationToken ct)
+    private async Task<JsonDocument> Get(string relative, CancellationToken ct, bool allowEmpty = false)
     {
         using var response = await http.GetAsync(relative, ct); response.EnsureSuccessStatusCode();
         var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         if (doc.RootElement.GetProperty("code").GetString() != "0")
         { var message = doc.RootElement.GetProperty("msg").GetString(); doc.Dispose(); throw new HttpRequestException("OKX: " + message); }
-        if (doc.RootElement.GetProperty("data").GetArrayLength() == 0) { doc.Dispose(); throw new HttpRequestException("OKX returned no data."); }
+        if (!allowEmpty && doc.RootElement.GetProperty("data").GetArrayLength() == 0) { doc.Dispose(); throw new HttpRequestException("OKX returned no data."); }
         return doc;
     }
     public static async IAsyncEnumerable<PriceSample> StreamAsync(Uri endpoint, [EnumeratorCancellation] CancellationToken ct)

@@ -7,7 +7,7 @@ export function create(host, dotnet) {
         layout: { background: { color: '#13191d' }, textColor: '#86939b', fontFamily: 'Segoe UI, sans-serif', fontSize: 11, attributionLogo: true },
         grid: { vertLines: { color: '#20282d' }, horzLines: { color: '#20282d' } },
         rightPriceScale: { borderColor: '#283238', scaleMargins: { top: .12, bottom: .22 } },
-        timeScale: { borderColor: '#283238', timeVisible: true, secondsVisible: false, rightOffset: 12,
+        timeScale: { borderColor: '#283238', timeVisible: true, secondsVisible: false, rightOffset: 12, minBarSpacing: .02,
             tickMarkFormatter: (t, kind) => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai',
                 ...(kind === L.TickMarkType.Year ? { year: 'numeric' } : kind === L.TickMarkType.Month ? { month: 'short' } :
                     kind === L.TickMarkType.DayOfMonth ? { day: 'numeric' } : { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) }).format(new Date(t * 1000)) },
@@ -38,7 +38,13 @@ export function create(host, dotnet) {
         while (b - a > 1) { const m = (a + b) >> 1; if (times[m] <= time) a = m; else b = m; }
         return a + (time - times[a]) / (times[b] - times[a]);
     };
-    const xAt = time => { const logical = logicalAt(time); return logical === null ? null : chart.timeScale().logicalToCoordinate(logical); };
+    const xAt = time => {
+        const logical = logicalAt(time); if(logical===null) return null;
+        // A range endpoint can fall between chart bars; interpolate integer bar coordinates.
+        const index=Math.floor(logical),fraction=logical-index;
+        const a=chart.timeScale().logicalToCoordinate(index),b=chart.timeScale().logicalToCoordinate(index+1);
+        return a===null||b===null?null:a+(b-a)*fraction;
+    };
     const pointAt = (x, y) => {
         const logical = chart.timeScale().coordinateToLogical(x), price = series.coordinateToPrice(y);
         if (logical === null || price === null || !times.length || price <= 0) return null;
@@ -92,6 +98,7 @@ export function create(host, dotnet) {
         for (const [key,button] of buttons) if (!keep.has(key)) { button.remove(); buttons.delete(key); labelPositions.delete(key); }
         host.dataset.profiles = JSON.stringify(profiles.map(p=>p.id)); host.dataset.drawings = JSON.stringify(drawings.map(d=>d.id));
         host.dataset.watches = JSON.stringify(watches.map(w=>w.id)); host.dataset.zones = JSON.stringify(zones.map(z=>z.id));
+        host.dataset.candleStart = String(times[0] || ''); host.dataset.candleCount = String(times.length);
         if(moved) primitive.refresh?.();
     };
     const scheduleLabels = () => { if (!frame && !disposed) frame = requestAnimationFrame(syncLabels); };

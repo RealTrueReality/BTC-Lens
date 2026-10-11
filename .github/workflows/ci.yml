@@ -50,3 +50,4 @@ jobs:
             test-results/screenshots/
             test-results/price-context/
             test-results/chart-workspace/
+            test-results/profile-history/

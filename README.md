@@ -6,7 +6,7 @@
 
 BTC Lens combines a BTC market radar, chart drawings, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data.
 
-**当前 V0.2.2**：启动即接入实时行情。点击图上 OB / FVG 加入关注；矩形、水平线、趋势线可绘制、拖动、保存与删除。多个固定范围成交量分布可同时显示、分别隐藏和删除。日/周/月 VWAP 与实时 CVD / OI 持续采集。
+**当前 V0.2.3**：固定范围成交量选区自动补取所选历史，不再限制 40 天；显示加载进度，支持取消、缓存续传与明确确认部分覆盖。保存后的历史选区可在当前周期图中定位。点击图上 OB / FVG 加入关注；多个绘图和成交量选区可分别管理。日/周/月 VWAP 与实时 CVD / OI 持续采集。
 
 ![行情雷达与多个成交量选区：离线测试截图](docs/screenshots/radar.png)
 

@@ -22,6 +22,7 @@ public sealed record SavedProfile(string Id, string Scope, string Name, string D
 }
 public sealed record PriceReference(string Kind, string EvidenceId, string Label, decimal Price,
     long KnownAt, string Algorithm, string SourceHash);
+public sealed record ProfileLoadProgress(int Loaded, int Expected, int Pages, string Status);
 public sealed record VwapPoint(long KnownAt, decimal Value, int Segment);
 public sealed record VwapResult(string Period, long Anchor, long KnownAt, int OffsetHours,
     decimal? Value, decimal WeightedSum, decimal VolumeBtc, CandleCoverage Coverage,
@@ -45,6 +46,16 @@ public static class PriceContextRules
     public const long Step = 300_000;
     public const string ProfileVersion = "Candle-Uniform-Profile/1.0:VA-CrossTarget:POC-LowerTie";
     public const string VwapVersion = "Closed-5m-HLC3-VWAP/1.0";
+    public static void ValidateProfileRange(long start, long end, long cutoff, int rowCount, decimal valueAreaPercent)
+    {
+        if (start <= 0 || start % Step != 0 || end % Step != 0)
+            throw new ArgumentException("开始和结束时间必须对齐 5 分钟，例如 09:00、09:05。");
+        if (end <= start) throw new ArgumentException("结束时间必须晚于开始时间。");
+        if (end > cutoff) throw new ArgumentException("结束时间不能晚于当前已收盘的 5m K 线。");
+        if ((end - start) / Step > int.MaxValue) throw new ArgumentException("所选时间范围超出可计算范围。");
+        if (rowCount is < 8 or > 120 || valueAreaPercent is < 1 or > 100)
+            throw new ArgumentException("行数应为 8–120，价值区比例应为 1–100%。");
+    }
     public static readonly string[] Periods = ["day", "week", "month"];
     public static string PeriodName(string period) => period switch { "day" => "日", "week" => "周", "month" => "月", _ => throw new ArgumentException("Invalid period.") };
     public static long Anchor(long timestamp, string period, int offsetHours)
@@ -69,6 +80,18 @@ public static class PriceContextRules
             bars.FirstOrDefault()?.OpenTime, bars.LastOrDefault()?.CloseTime));
     }
     public static Candle[] ClosedBars(IEnumerable<Candle> input, long start, long end, long cutoff) => Select(input, start, end, cutoff).Bars;
+    public static Candle[] DisplayBars(IEnumerable<Candle> input, string timeframe, long cutoff)
+    {
+        var step = Timeframes.Milliseconds(timeframe);
+        var offset = timeframe == "1D" ? 28_800_000L : 0;
+        var source = input.Where(c => c.Valid && c.Confirmed && c.Timeframe == "5m" && c.CloseTime <= cutoff)
+            .GroupBy(c => c.OpenTime).Select(g => g.Last()).OrderBy(c => c.OpenTime);
+        if (timeframe == "5m") return source.ToArray();
+        return source.GroupBy(c => (c.OpenTime + offset) / step * step - offset)
+            .Where(g => g.Count() == step / Step && g.First().OpenTime == g.Key && g.Last().CloseTime == g.Key + step)
+            .Select(g => new Candle("BTC-USDT-SWAP", timeframe, g.Key, g.First().Open, g.Max(c => c.High), g.Min(c => c.Low),
+                g.Last().Close, g.Sum(c => c.Volume), true)).ToArray();
+    }
     private static void Validate(InstrumentInfo instrument)
     {
         if (instrument.Id != "BTC-USDT-SWAP" || instrument.ContractCurrency != "BTC" || instrument.ContractValue <= 0 || instrument.TickSize <= 0)
@@ -86,9 +109,7 @@ public static class PriceContextRules
         InstrumentInfo instrument, int rowCount = 40, decimal valueAreaPercent = 70)
     {
         Validate(instrument);
-        if (start % Step != 0 || end % Step != 0 || end <= start || end > cutoff || end - start > 40 * 86_400_000L)
-            throw new ArgumentException("选区必须为已结束的 5m 整点，跨度不超过 40 天。");
-        if (rowCount is < 8 or > 120 || valueAreaPercent is < 1 or > 100) throw new ArgumentException("行数应为 8–120，价值区比例应为 1–100%。");
+        ValidateProfileRange(start, end, cutoff, rowCount, valueAreaPercent);
         var (bars, coverage) = Select(input, start, end, cutoff);
         var hash = Hash(bars);
         if (bars.Length == 0) return new(ProfileVersion, instrument.Id, start, end, cutoff,

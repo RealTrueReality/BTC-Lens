@@ -109,8 +109,9 @@
     private ChartObjectSelection? selection;
     private ChartDrawing[] drawings = [];
     private CandleChart? candleChart;
-    private Candle[] CurrentCandles => timeframe == "5m" ? view.ContextCandles.Concat(view.Candles.GetValueOrDefault(timeframe) ?? [])
-        .GroupBy(c => c.OpenTime).Select(g => g.Last()).OrderBy(c => c.OpenTime).ToArray() : view.Candles.GetValueOrDefault(timeframe) ?? [];
+    private Candle[] CurrentCandles => PriceContextRules.DisplayBars((timeframe == "5m" ? view.ContextCandles : [])
+        .Concat(ChartProfiles.OrderBy(p => p.CreatedAt).SelectMany(p => p.SourceBars)), timeframe, view.Cutoff)
+        .Concat(view.Candles.GetValueOrDefault(timeframe) ?? []).GroupBy(c => c.OpenTime).Select(g => g.Last()).OrderBy(c => c.OpenTime).ToArray();
     private SavedProfile[] ChartProfiles => showProfile ? view.PriceContext.Profiles.Where(p => p.Visible).ToArray() : [];
     private DetectedZone? SelectedZone => selection?.Kind == "zone" ? ChartZones.FirstOrDefault(z => z.Id == selection.Id) : null;
     private ChartDrawing? SelectedDrawing => selection?.Kind == "drawing" ? drawings.FirstOrDefault(d => d.Id == selection.Id) : null;

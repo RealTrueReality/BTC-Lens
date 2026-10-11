@@ -1,5 +1,7 @@
 # 架构与数据模型
 
+固定范围历史加载由 `ProfileHistoryLoader` 独立处理。SQLite `candle_cache` 的作用域与开盘时间联合索引用于读取指定区间；按缺失区间分页，逐页持久化，取消后继续复用缓存。网络请求与成交量计算不占用实时价格更新锁，保存前重新检查作用域与取消状态。Testing + OfflineFixture 使用隔离 HTTP 传输且不启动网络采集后台服务。
+
 ~~~mermaid
 flowchart LR
     A[OKX REST / WebSocket] --> B[MarketEngine]

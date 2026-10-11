@@ -1,6 +1,6 @@
 @page "/guide"
 <PageTitle>规则与数据 · BTC Lens</PageTitle>
-<div class="page-heading"><div><div class="eyebrow">KNOW WHAT YOU ARE LOOKING AT</div><h1>规则与数据<span class="title-dot">.</span></h1><p>了解标记的来源、确认时间和当前能力。</p></div><span class="pill">V0.2.2</span></div>
+<div class="page-heading"><div><div class="eyebrow">KNOW WHAT YOU ARE LOOKING AT</div><h1>规则与数据<span class="title-dot">.</span></h1><p>了解标记的来源、确认时间和当前能力。</p></div><span class="pill">V0.2.3</span></div>
 <div class="guide-grid">
 <section class="panel guide-card"><span class="eyebrow">01 / REFERENCE DETECTORS</span><h2>自动区域</h2><h3>Reference FVG / 1.0</h3><p>连续三根已收盘 K 线 A、B、C。看涨：C.Low &gt; A.High；看跌：C.High &lt; A.Low。第三根收盘后确认。触及和完全填补分别记录；等号不构成缺口。</p><h3>Reference OB / 1.0 : N5</h3><p>左右各 5 根确认摆动点。收盘突破已确认摆动点后，选取摆动点到突破之间最后一根反向 K 线，以完整高低区间画参考 OB。后续收盘越过远端边界后失效。</p><p class="form-note">本项目自有参考算法。与 LuxAlgo / TradingFinder 指标的完整逻辑不等价，也不自动代表完整交易 setup。</p></section>
 <section class="panel guide-card"><span class="eyebrow">02 / AVAILABILITY & TIME</span><h2>时间与来源</h2><p>机器时间存为 UTC，界面使用北京时间。确认标记同时保存来源与确认时间；指标只使用确认时点前的数据。</p><p>前日/前周高低与当日开盘采用 OKX 原生 UTC+8 周期。未收盘 K 线可以显示，检测器只使用已收盘且确认的数据。</p><p>程序启动即连接实时 OKX 公共行情，价格订阅不可用时尝试 REST 兜底。已有本地记录和历史缓存继续保留。</p></section>

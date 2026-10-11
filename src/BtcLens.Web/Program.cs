@@ -16,14 +16,22 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 builder.Services.AddSingleton<ILensStore>(_ => new LensStore(builder.Configuration["DatabasePath"] ?? Path.Combine(builder.Environment.ContentRootPath, "App_Data", "btclens.db")));
-builder.Services.AddHttpClient<OkxClient>(client => { client.BaseAddress = new Uri(builder.Configuration["Okx:RestUrl"] ?? "https://www.okx.com/"); client.Timeout = TimeSpan.FromSeconds(8); });
 var offlineFixture = builder.Environment.IsEnvironment("Testing") && builder.Configuration.GetValue<bool>("OfflineFixture");
+var okxHttp = builder.Services.AddHttpClient<OkxClient>(client => { client.BaseAddress = new Uri(builder.Configuration["Okx:RestUrl"] ?? "https://www.okx.com/"); client.Timeout = TimeSpan.FromSeconds(8); });
+if (offlineFixture)
+{
+    builder.Services.AddSingleton<OfflineHistoryHandler>();
+    okxHttp.ConfigurePrimaryHttpMessageHandler(services => services.GetRequiredService<OfflineHistoryHandler>());
+}
 builder.Services.AddSingleton<MarketEngine>(services => new(services.GetRequiredService<ILensStore>(),
     services.GetRequiredService<OkxClient>(), services.GetRequiredService<OrderFlowEngine>(), useFixture: offlineFixture));
 builder.Services.AddSingleton<OrderFlowEngine>();
-builder.Services.AddHostedService<MarketWorker>();
-builder.Services.AddHostedService<OrderFlowWorker>();
-builder.Services.AddHostedService<PriceContextWorker>();
+if (!offlineFixture)
+{
+    builder.Services.AddHostedService<MarketWorker>();
+    builder.Services.AddHostedService<OrderFlowWorker>();
+    builder.Services.AddHostedService<PriceContextWorker>();
+}
 
 var app = builder.Build();
 
@@ -59,6 +67,8 @@ if (offlineFixture)
 {
     app.MapPost("/test/replay", async (MarketEngine market) => { await market.SwitchModeAsync("demo"); await market.NewReplayAsync(); return Results.Ok(new { market.View.Scope, market.View.Cutoff }); });
     app.MapPost("/test/step/{count:int}", async (int count, MarketEngine market) => { await market.StepAsync(count); return Results.Ok(new { market.View.Cutoff }); });
+    app.MapPost("/test/live-history", async (MarketEngine market) => { await market.SwitchModeAsync("live"); await market.RefreshLiveAsync(default); return Results.Ok(new { market.View.Scope }); });
+    app.MapGet("/test/history-stats", (OfflineHistoryHandler history) => Results.Ok(new { requests = history.HistoryRequests }));
 }
 
 app.Run();
