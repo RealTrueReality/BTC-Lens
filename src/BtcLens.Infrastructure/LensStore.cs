@@ -28,8 +28,28 @@ public sealed class LensStore : ILensStore, IDisposable
     }
     public string? GetSetting(string key) { lock (sync) return db.Queryable<SettingRow>().InSingle(key)?.Value; }
     public void SetSetting(string key, string value) { lock (sync) db.Storageable(new SettingRow { Key = key, Value = value }).ExecuteCommand(); }
-    public WatchZone[] Watches(string scope) { lock (sync) return db.Queryable<WatchRow>().Where(x => x.Scope == scope).ToList().Select(x => JsonCodec.Read<WatchZone>(x.Json)).OrderByDescending(x => x.Current.CreatedAt).ToArray(); }
-    public void SaveWatch(WatchZone zone) { lock (sync) db.Storageable(Watch(zone)).ExecuteCommand(); }
+    public WatchZone[] Watches(string scope, bool includeDeleted = false) { lock (sync) return db.Queryable<WatchRow>().Where(x => x.Scope == scope).ToList().Select(x => JsonCodec.Read<WatchZone>(x.Json)).Where(x => includeDeleted || x.DeletedAt is null).OrderByDescending(x => x.Current.CreatedAt).ToArray(); }
+    public void SaveWatch(WatchZone zone)
+    {
+        lock (sync)
+        {
+            if (db.Queryable<WatchRow>().InSingle(zone.Id) is { } row && JsonCodec.Read<WatchZone>(row.Json).DeletedAt is not null)
+                throw new ArgumentException("关注区已删除，请重新建立关注区。");
+            db.Storageable(Watch(zone)).ExecuteCommand();
+        }
+    }
+    public bool DeleteWatch(string scope, string id, int expectedRevision, DateTimeOffset deletedAt)
+    {
+        lock (sync)
+        {
+            var row = db.Queryable<WatchRow>().InSingle(id);
+            if (row is null || row.Scope != scope) return false;
+            var zone = JsonCodec.Read<WatchZone>(row.Json);
+            if (zone.DeletedAt is not null || zone.Current.Revision != expectedRevision) return false;
+            db.Updateable(Watch(zone with { Enabled = false, LastSample = null, DeletedAt = deletedAt })).ExecuteCommand();
+            return true;
+        }
+    }
     public AlertEvent[] Alerts(string scope) { lock (sync) return db.Queryable<AlertRow>().Where(x => x.Scope == scope).OrderByDescending(x => x.Timestamp).Take(200).ToList().Select(x => JsonCodec.Read<AlertEvent>(x.Json)).ToArray(); }
     public AlertEvent? FindAlert(string id) { lock (sync) { var row = db.Queryable<AlertRow>().InSingle(id); return row is null ? null : JsonCodec.Read<AlertEvent>(row.Json); } }
     public bool RecordAlert(WatchZone updated, AlertEvent alert)
@@ -39,7 +59,9 @@ public sealed class LensStore : ILensStore, IDisposable
             db.Ado.BeginTran();
             try
             {
-                if (db.Queryable<AlertRow>().InSingle(alert.Id) is not null) { db.Ado.CommitTran(); return false; }
+                if (db.Queryable<AlertRow>().InSingle(alert.Id) is not null ||
+                    db.Queryable<WatchRow>().InSingle(updated.Id) is { } row && JsonCodec.Read<WatchZone>(row.Json).DeletedAt is not null)
+                { db.Ado.CommitTran(); return false; }
                 db.Insertable(new AlertRow { Id = alert.Id, Scope = alert.Scope, Timestamp = alert.CreatedAt.ToUnixTimeMilliseconds(), Json = JsonCodec.Write(alert) }).ExecuteCommand();
                 db.Storageable(Watch(updated)).ExecuteCommand();
                 db.Ado.CommitTran(); return true;

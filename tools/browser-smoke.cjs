@@ -77,6 +77,8 @@ const pause = page => page.waitForTimeout(350);
     assert.match(await page.locator('.detail-pnl').innerText(),/\+1\.40/);
     assert.match(await page.locator('.review-content').innerText(),/Browser smoke/);
     assert.equal(await page.locator('.trade-screenshot img').count(),1);
+    const linkedTradeId = await page.locator('.trade-table tbody tr.row-selected').getAttribute('data-trade-id');
+    assert.ok(linkedTradeId);
     await page.reload(); await pause(page);
     assert.match(await page.locator('.trade-table').innerText(),/\+1\.40/);
     checks.push('alert → journal / costs / R / review persistence');
@@ -112,6 +114,27 @@ const pause = page => page.waitForTimeout(350);
     await page.getByRole('button',{name:'关闭提醒',exact:true}).click();
     checks.push('watch revision / immutable original event');
 
+    await page.locator('.watch-card').filter({hasText:'原关注区 · v2'}).getByRole('button',{name:'删除',exact:true}).click();
+    await page.waitForSelector('.watch-card',{state:'hidden'});
+    await page.reload(); await page.waitForSelector('.chart-host canvas');
+    assert.equal(await page.locator('.watch-card').count(),0);
+    assert.equal(await page.locator('.event-row').count(),1);
+    await page.locator('.event-row').first().click();
+    await page.getByText('查看保存的证据数据',{exact:true}).click();
+    assert.equal(await page.locator('.json-block').innerText(),snapshotBefore);
+    await page.getByRole('button',{name:'关闭提醒',exact:true}).click();
+    await page.goto(base+'/journal'); await page.waitForSelector('.trade-table');
+    await page.locator('.trade-table tbody tr[data-trade-id="'+linkedTradeId+'"]').click();
+    await page.getByText('关联到区证据',{exact:false}).click();
+    assert.match(await page.locator('.review-content').innerText(),/回踩观察 · 演示关注区/);
+    checks.push('watch deletion / reload persistence / original event and linked trade retained');
+    await page.goto(base); await page.waitForSelector('.chart-host canvas');
+
+    const candidateStates = await page.locator('.lower-grid table tbody tr:has(.table-tf) td:nth-child(3)').allTextContents();
+    assert.ok(candidateStates.length > 0);
+    assert.ok(candidateStates.every(s => s.trim()==='未回访'));
+    checks.push('automatic candidates contain only untouched zones');
+
     await page.locator('.lower-grid table .text-button').first().click();
     await page.getByLabel('名称',{exact:true}).fill('自动参考加入关注');
     await page.getByRole('button',{name:'保存并启用',exact:true}).click();
@@ -127,6 +150,10 @@ const pause = page => page.waitForTimeout(350);
     await page.getByLabel('名称',{exact:true}).fill('图上手动选区');
     await page.getByRole('button',{name:'保存并启用',exact:true}).click();
     await page.waitForSelector('[aria-label="关注区编辑"]',{state:'hidden'});
+    const manual = page.locator('.watch-card').filter({hasText:'图上手动选区'});
+    await manual.getByRole('button',{name:'删除',exact:true}).click();
+    await manual.waitFor({state:'hidden'});
+    assert.equal(await page.locator('.watch-card').filter({hasText:'自动参考加入关注'}).count(),1);
     checks.push('auto zone promotion / chart two-click region');
 
     await page.getByRole('button',{name:'生成报告 ↗',exact:true}).click();

@@ -1,5 +1,6 @@
 using BtcLens.Core;
 using BtcLens.Infrastructure;
+using BtcLens.Application;
 
 namespace BtcLens.Tests;
 public sealed class IndicatorTests
@@ -34,6 +35,24 @@ public sealed class IndicatorTests
         Assert.Equal(ZoneLife.Touched, touched.Life);
         var filled = Assert.Single(Indicators.Detect([.. bars, Bar(3, 118, 119, 105, 109)], bars[^1].CloseTime + 300_000), z => z.KnownAt == bars[^1].CloseTime);
         Assert.Equal(ZoneLife.Filled, filled.Life);
+    }
+    [Theory]
+    [InlineData(ZoneKind.Fvg)]
+    [InlineData(ZoneKind.OrderBlock)]
+    public void ReportDropsUsedZoneOnlyAfterReturnBarClosesAndRetainsLifecycleEvidence(ZoneKind kind)
+    {
+        Candle[] bars = kind == ZoneKind.Fvg
+            ? [.. FvgBars(), Bar(3, 118, 119, 108, 112)]
+            : [Bar(0,100,104,96,101), Bar(1,101,106,98,104), Bar(2,104,110,100,105),
+               Bar(3,105,107,99,102), Bar(4,102,106,98,103), Bar(5,103,108,97,101),
+               Bar(6,101,112,100,111), Bar(7,111,112,107,111)];
+        var before = MarketView.Empty with { Cutoff = bars[^1].CloseTime - 1, Zones = Indicators.Detect(bars, bars[^1].CloseTime - 1, 2) };
+        var zone = Assert.Single(before.Zones, z => z.Kind == kind);
+        Assert.Equal(ZoneLife.Active, zone.Life);
+        Assert.Contains(AnalysisReport.Build(before, []).Observations, o => o.Contains(zone.Id));
+        var after = before with { Cutoff = bars[^1].CloseTime, Zones = Indicators.Detect(bars, bars[^1].CloseTime, 2) };
+        Assert.Equal(ZoneLife.Touched, Assert.Single(after.Zones, z => z.Id == zone.Id).Life);
+        Assert.DoesNotContain(AnalysisReport.Build(after, []).Observations, o => o.Contains(zone.Id));
     }
     [Fact] public void GapMakesExistingLifecycleUnknownAndDoesNotCreateBridgedFvg()
     {

@@ -40,6 +40,64 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(savedJson,s.FindAlert(a.Id)!.EvidenceJson); Assert.Equal(1,s.FindAlert(a.Id)!.Revision);
         await engine.NewReplayAsync(); Assert.NotEqual(oldScope,engine.View.Scope); Assert.Empty(s.Alerts(engine.View.Scope)); Assert.NotNull(s.FindAlert(a.Id));
     }
+    [Fact] public async Task DeletedWatchStopsMonitoringAndDoesNotReturnAfterRestart()
+    {
+        string scope;
+        using (var s = new LensStore(FilePath))
+        {
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            scope = engine.View.Scope; var watch = Assert.Single(s.Watches(scope));
+            await engine.SwitchModeAsync("live");
+            engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            await engine.SwitchModeAsync("demo");
+            await engine.DeleteWatchAsync(watch.Id, watch.Current.Revision, scope);
+            await engine.StepAsync(10);
+            Assert.Empty(s.Watches(scope)); Assert.Empty(s.Alerts(scope));
+            await Assert.ThrowsAsync<ArgumentException>(() => engine.SaveWatchAsync(watch.Id, 1, watch.Current));
+        }
+        using (var s = new LensStore(FilePath))
+        {
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            Assert.Equal(scope, engine.View.Scope); Assert.Empty(s.Watches(scope));
+            await engine.NewReplayAsync(); Assert.Single(s.Watches(engine.View.Scope));
+        }
+    }
+    [Fact] public async Task DeletionKeepsEventAndLinkedTradeAndRejectsLateWrites()
+    {
+        string scope, eventId, eventJson, tradeJson;
+        using (var s = new LensStore(FilePath))
+        {
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient())); scope = engine.View.Scope;
+            var watch = Assert.Single(s.Watches(scope)); await engine.StepAsync(5);
+            var alert = Assert.Single(s.Alerts(scope)); eventId = alert.Id; eventJson = JsonCodec.Write(alert);
+            var trade = TradeTests.Example() with { Id = "linked", Mode = "demo", AlertId = eventId, EntrySnapshotJson = alert.EvidenceJson };
+            s.SaveTrade(trade); tradeJson = JsonCodec.Write(trade);
+            await engine.DeleteWatchAsync(watch.Id, 1, scope);
+            Assert.Empty(s.Watches(scope));
+            Assert.Throws<ArgumentException>(() => s.SaveWatch(watch));
+            Assert.False(s.RecordAlert(watch with { Triggered = true }, alert with { Id = eventId + ":late" }));
+            Assert.Single(s.Alerts(scope));
+        }
+        using (var s = new LensStore(FilePath))
+        {
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            Assert.Empty(s.Watches(scope));
+            Assert.Equal(eventJson, JsonCodec.Write(s.FindAlert(eventId)));
+            Assert.Equal(tradeJson, JsonCodec.Write(s.FindTrade("linked")));
+        }
+    }
+    [Fact] public async Task DeleteRejectsChangedRevisionAndDifferentWorkspace()
+    {
+        using var s = new LensStore(FilePath); var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+        var scope = engine.View.Scope; var watch = Assert.Single(s.Watches(scope));
+        await engine.SaveWatchAsync(watch.Id, 1, watch.Current with { Notes = "changed in another tab" });
+        await Assert.ThrowsAsync<ArgumentException>(() => engine.DeleteWatchAsync(watch.Id, 1, scope));
+        Assert.False(s.DeleteWatch("live", watch.Id, 2, DateTimeOffset.UtcNow));
+        Assert.Equal(2, Assert.Single(s.Watches(scope)).Current.Revision);
+        await engine.NewReplayAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() => engine.DeleteWatchAsync(watch.Id, 2, scope));
+        Assert.Single(s.Watches(scope)); Assert.Single(s.Watches(engine.View.Scope));
+    }
     public void Dispose()
     {
         // Only remove the literal unique directory created by this test instance.

@@ -48,6 +48,7 @@ Scope=live 用于真实行情关注区；每个演示回放使用独立 demo:会
 - 参考 OB：Active → Touched → Invalidated。
 - 已形成区域的后续数据断档：Unknown。
 - 关注区：Enabled 与 Triggered 分别保存；暂停不改写历史；编辑建立新版本并重新启用。
+- 关注区删除使用 DeletedAt 标记，查询与监控排除已删除对象；按 Scope 与版本校验删除，拒绝滞后编辑或提醒重新写入。演示关注区按会话只初始化一次，删除最后一个后重启也不补建；旧事件及交易快照不改写。
 - 首次到区事件键：Scope + WatchId + Revision + RuleVersion。
 - CSV 交易键：SHA-256(Mode + external_id)，不同模式分别去重。
 

@@ -18,7 +18,7 @@ else
 <div class="metric-grid">
     <div class="metric"><span class="metric-label"><span class="btc-mini">₿</span> BTC / USDT <span class="metric-unit">永续</span></span><div class="metric-number mono">@LensFormat.Price(view.Quote?.Price)<small>USDT</small></div><span class="metric-foot">最新观测价 · @view.Transport</span></div>
     <div class="metric"><span class="metric-label">我的关注区</span><div class="metric-number mono">@watches.Count(w => w.Enabled)<small>监控中</small></div><span class="metric-foot"><span class="tiny-line amber-line"></span>@watches.Count(w => w.Triggered) 个已记录首次到区</span></div>
-    <div class="metric"><span class="metric-label">自动参考区域</span><div class="metric-number mono">@view.Zones.Count(z => z.Life is ZoneLife.Active or ZoneLife.Touched)<small>当前候选</small></div><span class="metric-foot">FVG + Reference OB · 已确认数据</span></div>
+    <div class="metric"><span class="metric-label">自动参考区域</span><div class="metric-number mono">@view.Zones.Count(z => z.Life == ZoneLife.Active)<small>未回访</small></div><span class="metric-foot">FVG + Reference OB · 已确认数据</span></div>
     <div class="metric"><span class="metric-label">到区记录</span><div class="metric-number mono">@alerts.Length<small>本工作区</small></div><span class="metric-foot">触发价格与证据快照一起保留</span></div>
 </div>
 <div class="radar-grid">
@@ -28,7 +28,7 @@ else
         <div class="chart-toolbar context-layers"><div class="layer-options"><label><input type="checkbox" @bind="showDayVwap" /><span class="legend-dot green"></span>日 VWAP</label><label><input type="checkbox" @bind="showWeekVwap" /><span class="legend-dot amber"></span>周 VWAP</label><label><input type="checkbox" @bind="showMonthVwap" />月 VWAP</label><label><input type="checkbox" @bind="showProfile" />固定范围分布</label></div><button class="text-button @(rangeDrawing ? "accent" : "")" @onclick="ToggleRangeDrawing">@(rangeDrawing ? "取消时间选区" : "成交量选区")</button></div>
         @if (drawing || rangeDrawing) { <div class="drawing-hint">@(rangeDrawing ? "在图上依次点击起始和结束 K 线，选择时间范围。" : "在图上依次点击两个价格位置，选定关注区边界。")</div> }
         <CandleChart Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Drawing="drawing" RangeDrawing="rangeDrawing" Scope="@view.Scope" RegionSelected="Picked" TimeRangeSelected="RangePicked" Profile="@(showProfile ? SelectedProfile : null)" Vwaps="ChartVwaps" />
-        <div class="chart-caption"><span><span class="legend-dot amber"></span>虚线区域：你的关注区</span><span>时间：UTC+8 · 自动区域在确认后显示</span></div>
+        <div class="chart-caption"><span><span class="legend-dot amber"></span>虚线区域：你的关注区</span><span>时间：UTC+8 · 自动区域仅显示未回访区域</span></div>
     </section>
     <section class="panel watch-panel"><div class="panel-heading"><h2>我的关注区 <span class="count-badge">@watches.Length</span></h2><button class="icon-button" aria-label="新增关注区" @onclick="NewWatch">＋</button></div>
         <div class="watch-list">
@@ -38,7 +38,7 @@ else
                 <div class="watch-card @(!w.Enabled ? "paused" : "")"><div class="watch-top"><span class="pill @(w.Current.Bias == Bias.Bullish ? "green" : w.Current.Bias == Bias.Bearish ? "red" : "")">@w.Current.Timeframe · @LensFormat.BiasName(w.Current.Bias)</span><span class="watch-status @(w.Triggered ? "accent" : "")">@(w.Triggered ? "已到区" : !w.Enabled ? "已暂停" : view.Quote is not null && WatchRules.Inside(w.Current, view.Quote.Price) ? "当前在区内" : "等待到区")</span></div><h3>@w.Current.Name</h3><div class="watch-price mono">@LensFormat.Price(w.Current.Lower) <span>—</span> @LensFormat.Price(w.Current.Upper)</div><p>@w.Current.Notes</p>
                     @if (w.Current.SourceZoneId is not null) { <small class="source-note">来源状态：@(view.Zones.FirstOrDefault(z => z.Id == w.Current.SourceZoneId) is { } origin ? LensFormat.Life(origin.Life) : "当前窗口未覆盖") · 手动边界保留</small> }
                     @if (w.Current.PriceReference is { } reference) { <small class="source-note">参考来源：@reference.Label · 保存时 @LensFormat.Price(reference.Price) · @LensFormat.Time(reference.KnownAt)</small> }
-                    <div class="watch-actions"><small>v@(w.Current.Revision) · 首次观测进入</small><div><button class="text-button" @onclick="() => EditWatch(w)">编辑</button><button class="text-button" @onclick="() => Market.ToggleWatchAsync(w.Id)">@(w.Enabled ? "暂停" : "启用")</button></div></div></div>
+                    <div class="watch-actions"><small>v@(w.Current.Revision) · 首次观测进入</small><div><button class="text-button" @onclick="() => EditWatch(w)">编辑</button><button class="text-button" @onclick="() => Market.ToggleWatchAsync(w.Id)">@(w.Enabled ? "暂停" : "启用")</button><button class="text-button" style="color:var(--red)" title="删除关注区并停止监控" @onclick="() => DeleteWatch(w)">删除</button></div></div></div>
             }
         </div><div class="panel-tip">到区记录帮助你回看价格反应；确认条件与目标由你判断。</div>
     </section>
@@ -48,7 +48,7 @@ else
 <div class="lower-grid">
     <section class="panel"><div class="panel-heading"><h2>自动参考区域</h2><span class="subtle-label">当前周期 @(showHtf ? "+ 大周期" : "")</span></div><div class="table-wrap"><table><thead><tr><th>类型 / 周期</th><th>价格范围</th><th>状态</th><th>确认时间</th><th></th></tr></thead><tbody>
         @foreach (var z in VisibleZones.Take(8)) { <tr><td><span class="pill @(z.Bias == Bias.Bullish ? "green" : "red")">@LensFormat.Kind(z.Kind)</span><span class="table-tf">@z.Timeframe</span></td><td class="mono">@LensFormat.Price(z.Lower) — @LensFormat.Price(z.Upper)</td><td>@LensFormat.Life(z.Life)</td><td class="muted">@LensFormat.Time(z.KnownAt)</td><td><button class="text-button accent" @onclick="() => FromZone(z)">＋ 关注</button></td></tr> }
-        @if (!VisibleZones.Any()) { <tr><td colspan="5" class="empty-cell">当前周期没有符合筛选的开放参考区域。可以手动建立关注区。</td></tr> }
+        @if (!VisibleZones.Any()) { <tr><td colspan="5" class="empty-cell">当前周期没有未回访的参考区域。可以手动建立关注区。</td></tr> }
     </tbody></table></div></section>
     <section class="panel"><div class="panel-heading"><h2>观察记录</h2><span class="subtle-label">证据随事件保存</span></div><div class="event-list">
         @foreach (var a in alerts.Take(4)) { <button class="event-row" @onclick="() => selectedAlert = a"><span class="event-icon">↳</span><span><b>@a.Zone.Name</b><small>@LensFormat.Time(a.CreatedAt) · 观测价 <span class="mono">@LensFormat.Price(a.Price)</span></small></span><span class="push-right muted">查看 →</span></button> }
@@ -91,7 +91,7 @@ else
     private AnalysisPacket? report;
     private long lastRender;
     private Candle[] CurrentCandles => view.Candles.TryGetValue(timeframe, out var bars) ? bars : [];
-    private IEnumerable<DetectedZone> VisibleZones => view.Zones.Where(z => z.Life is ZoneLife.Active or ZoneLife.Touched)
+    private IEnumerable<DetectedZone> VisibleZones => view.Zones.Where(z => z.Life == ZoneLife.Active)
         .Where(z => z.Timeframe == timeframe || showHtf && z.Timeframe is "1D" or "4H")
         .Where(z => z.Kind == ZoneKind.Fvg ? showFvg : showOb).OrderByDescending(z => z.KnownAt);
     private DetectedZone[] ChartZones => VisibleZones.Take(24).ToArray();
@@ -120,6 +120,17 @@ else
             Timeframe = source.Timeframe, Notes = "参考 " + r.Label + "，保存时价位 " + r.Price.ToString("0.0") + "；按自己的判断调整关注区宽度。", Reference = r };
     }
     private void CloseEditor() { editor = null; formError = null; }
+    private async Task DeleteWatch(WatchZone watch)
+    {
+        try
+        {
+            await Market.DeleteWatchAsync(watch.Id, watch.Current.Revision, watch.Scope);
+            if (editingId == watch.Id) CloseEditor();
+            Reload(); report = null;
+            Snack.Add("关注区已删除，监控已停止。", Severity.Success);
+        }
+        catch (ArgumentException ex) { Reload(); Snack.Add(ex.Message, Severity.Warning); }
+    }
     private async Task SaveWatch()
     {
         try { if (editorScope != Market.View.Scope) throw new ArgumentException("工作区已变化，请重新建立关注区。"); var e = editor!; await Market.SaveWatchAsync(editingId, editingRevision, new WatchVersion(0, e.Name, e.Lower, e.Upper, e.Timeframe, e.Bias, e.Notes, e.SourceId, default) { PriceReference = e.Reference }); CloseEditor(); Reload(); Snack.Add("关注区已保存，首次到区监控已启用。", Severity.Success); }

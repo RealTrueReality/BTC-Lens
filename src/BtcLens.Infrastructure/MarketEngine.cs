@@ -261,6 +261,19 @@ public sealed class MarketEngine
         finally { gate.Release(); }
         Notify();
     }
+    public async Task DeleteWatchAsync(string id, int expectedRevision, string expectedScope)
+    {
+        await gate.WaitAsync();
+        try
+        {
+            if (view.Scope != expectedScope) throw new ArgumentException("工作区已变化，请刷新后再删除关注区。");
+            if (!store.DeleteWatch(view.Scope, id, expectedRevision, DateTimeOffset.FromUnixTimeMilliseconds(view.Cutoff)))
+                throw new ArgumentException("关注区已变化或已删除，请刷新后重试。");
+            foreach (var key in samples.Keys.Where(key => key.StartsWith(id + ":", StringComparison.Ordinal)).ToArray()) samples.Remove(key);
+        }
+        finally { gate.Release(); }
+        Notify();
+    }
     private void ProcessQuote(PriceSample quote, bool continuity)
     {
         foreach (var w in store.Watches(view.Scope))
@@ -292,7 +305,7 @@ public sealed class MarketEngine
     }
     private void SeedWatch()
     {
-        if (store.Watches(view.Scope).Length > 0) return;
+        if (store.Watches(view.Scope, includeDeleted: true).Length > 0) return;
         var v = new WatchVersion(1, "回踩观察 · 演示关注区", 67080, 67140, "5m", Bias.Bullish,
             "合成数据示例：推进约 3 根 5m K 线可观察首次到区。请按自己的判断添加或调整关注区。", null,
             DateTimeOffset.FromUnixTimeMilliseconds(view.Cutoff));
