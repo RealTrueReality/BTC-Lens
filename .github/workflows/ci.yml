@@ -44,4 +44,6 @@ jobs:
         if: always()
         with:
           name: browser-results
-          path: test-results/screenshots/
+          path: |
+            test-results/screenshots/
+            test-results/price-context/

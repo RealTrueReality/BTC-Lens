@@ -12,12 +12,16 @@ public sealed class MarketEngine
     private readonly Candle[] fixture = DemoMarket.Generate();
     private MarketView view = MarketView.Empty;
     private readonly Dictionary<string, PriceSample> samples = new();
+    private Candle[] contextCache = [];
+    private string contextStatus = "等待 5m 历史", contextError = "";
     public MarketView View { get { var state = Volatile.Read(ref view); return state.Mode == "live" ? state with { Flow = orderFlow?.View ?? FlowView.Empty, Cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() } : state; } }
     public event Action? Changed;
 
     public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null)
     {
         this.store = store; this.okx = okx; this.orderFlow = orderFlow;
+        var earliest = DateTimeOffset.UtcNow.AddDays(-40).ToUnixTimeMilliseconds();
+        contextCache = store.ReadCandles("live:analysis").Where(c => c.OpenTime >= earliest).ToArray();
         if (orderFlow is not null) orderFlow.Changed += Notify;
         var session = store.GetSetting("demo-session") ?? Guid.NewGuid().ToString("N")[..10];
         store.SetSetting("demo-session", session);
@@ -30,10 +34,18 @@ public sealed class MarketEngine
     private MarketView BuildDemo(int index, string scope)
     {
         var candles = DemoMarket.Visible(fixture, index); var last = fixture[index - 1];
-        return new("demo", scope, "合成数据 · 5m 收盘回放", "离线回放", null,
+        var state = new MarketView("demo", scope, "合成数据 · 5m 收盘回放", "离线回放", null,
             new("BTC-USDT-SWAP", .1m, .01m, "BTC"), new(last.Close, last.CloseTime, "5m 收盘回放"), last.CloseTime,
             candles, Detect(candles, last.CloseTime), Indicators.Levels(candles, last.CloseTime), index, fixture.Length)
-            { Flow = DemoOrderFlow.Build(fixture, index, scope) };
+            { Flow = DemoOrderFlow.Build(fixture, index, scope), ContextCandles = fixture.Take(index).ToArray() };
+        return Enrich(state);
+    }
+    private MarketView Enrich(MarketView state)
+    {
+        var offset = store.GetSetting("vwap-offset:" + state.Scope) == "0" ? 0 : 8;
+        return state with { PriceContext = new(state.Mode == "demo" ? "合成 5m 收盘数据" : contextStatus,
+            state.Mode == "live" && contextError.Length > 0 ? contextError : null, offset,
+            state.Instrument is null ? [] : PriceContextRules.Vwaps(state.ContextCandles, state.Cutoff, state.Instrument, offset), store.Profiles(state.Scope)) };
     }
     private static MarketView LiveEmpty() => new("live", "live", "正在连接 OKX", "等待行情", null, null, null,
         DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), new Dictionary<string, Candle[]>(), [], [], 0, 0);
@@ -101,8 +113,9 @@ public sealed class MarketEngine
         {
             if (view.Mode != "live") return;
             store.SaveCandles("live", candles.Values.SelectMany(x => x));
-            view = view with { Instrument = instrument, Candles = candles, Zones = Detect(candles, now), Levels = Indicators.Levels(candles, now), Cutoff = now, Error = null,
-                Status = view.Quote is not null && now - view.Quote.Timestamp <= 30_000 ? "OKX 公共行情" : "等待新鲜价格" };
+            MergeContext(candles["5m"], now);
+            view = Enrich(view with { Instrument = instrument, Candles = candles, ContextCandles = contextCache, Zones = Detect(candles, now), Levels = Indicators.Levels(candles, now), Cutoff = now, Error = null,
+                Status = view.Quote is not null && now - view.Quote.Timestamp <= 30_000 ? "OKX 公共行情" : "等待新鲜价格" });
         }
         finally { gate.Release(); }
         Notify();
@@ -122,6 +135,87 @@ public sealed class MarketEngine
         }
         finally { gate.Release(); }
         Notify();
+    }
+    private void MergeContext(IEnumerable<Candle> incoming, long now)
+    {
+        var closed = incoming.Where(c => c.Valid && c.Confirmed && c.Timeframe == "5m" && c.CloseTime <= now).ToArray();
+        store.SaveCandles("live:analysis", closed);
+        contextCache = contextCache.Concat(closed).GroupBy(c => c.OpenTime).Select(g => g.Last())
+            .Where(c => c.OpenTime >= now - 40 * 86_400_000L).OrderBy(c => c.OpenTime).ToArray();
+    }
+    public async Task LoadContextHistoryAsync(CancellationToken ct)
+    {
+        var state = View;
+        if (state.Mode != "live" || state.Instrument is null) return;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var start = new[] { 0, 8 }.SelectMany(offset => new[] { "week", "month" }.Select(p => PriceContextRules.Anchor(now, p, offset))).Min();
+        var end = now / PriceContextRules.Step * PriceContextRules.Step;
+        var existing = state.ContextCandles.Select(c => c.OpenTime).ToHashSet();
+        var missing = Enumerable.Range(0, (int)((end - start) / PriceContextRules.Step)).Select(i => start + i * PriceContextRules.Step)
+            .Where(t => !existing.Contains(t)).ToArray();
+        if (missing.Length == 0) { await SetContextStatusAsync("5m 历史已覆盖日/周/月锚点", null, ct); return; }
+        var cursor = missing[^1] + PriceContextRules.Step;
+        await SetContextStatusAsync("正在补充 5m 历史 · 已加载 " + state.ContextCandles.Length + " 根", null, ct);
+        for (var page = 0; page < 40 && cursor > missing[0]; page++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var bars = await okx.HistoryCandlesAsync(cursor, ct);
+            var older = bars.Where(c => c.OpenTime < cursor).ToArray();
+            if (older.Length == 0) throw new InvalidDataException("历史分页没有向前推进。");
+            await gate.WaitAsync(ct);
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                if (view.Mode != "live") return;
+                MergeContext(older.Where(c => c.OpenTime >= start), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                contextStatus = "正在补充 5m 历史 · 已加载 " + contextCache.Length + " 根"; contextError = "";
+                view = Enrich(view with { ContextCandles = contextCache, Cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+            }
+            finally { gate.Release(); }
+            Notify(); cursor = older.Min(c => c.OpenTime);
+            await Task.Delay(200, ct);
+        }
+        await SetContextStatusAsync("5m 历史加载结束 · " + contextCache.Length + " 根，完整性见各周期覆盖", null, ct);
+    }
+    public async Task SetContextStatusAsync(string status, string? error, CancellationToken ct)
+    {
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (view.Mode != "live") return;
+            contextStatus = status; contextError = error ?? "";
+            view = Enrich(view with { ContextCandles = contextCache, Cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+        }
+        finally { gate.Release(); }
+        Notify();
+    }
+    public async Task SetVwapOffsetAsync(int offset)
+    {
+        if (offset is not (0 or 8)) throw new ArgumentException("Invalid VWAP timezone.");
+        await gate.WaitAsync();
+        try { store.SetSetting("vwap-offset:" + view.Scope, offset.ToString()); view = Enrich(view with { Cutoff = View.Cutoff }); }
+        finally { gate.Release(); }
+        Notify();
+    }
+    public async Task<SavedProfile> SaveProfileAsync(string name, string timeframe, long start, long end, int rows, decimal area, string expectedScope)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 100 || !Timeframes.All.Contains(timeframe)) throw new ArgumentException("填写选区名称和有效周期。");
+        await gate.WaitAsync();
+        SavedProfile saved;
+        try
+        {
+            if (view.Scope != expectedScope) throw new ArgumentException("工作区已变化，请重新选择范围。");
+            var state = View;
+            var result = PriceContextRules.Profile(state.ContextCandles, start, end, state.Cutoff,
+                state.Instrument ?? throw new ArgumentException("等待合约元数据。"), rows, area);
+            if (result.Poc is null) throw new ArgumentException("所选范围没有可用的已收盘成交量，请检查数据覆盖。");
+            saved = new(Guid.NewGuid().ToString("N"), state.Scope, name.Trim(), timeframe, state.Cutoff, result,
+                PriceContextRules.ClosedBars(state.ContextCandles, start, end, state.Cutoff));
+            store.SaveProfile(saved);
+            view = Enrich(view with { Cutoff = state.Cutoff });
+        }
+        finally { gate.Release(); }
+        Notify(); return saved;
     }
     public async Task ReportErrorAsync(string message)
     {
@@ -180,7 +274,7 @@ public sealed class MarketEngine
                 var evidence = new { mode = view.Mode, scope = view.Scope, cutoff = view.Cutoff, quote, zone = w.Current,
                     rule = WatchRules.Version, instrument = view.Instrument, sourceZone = view.Zones.FirstOrDefault(z => z.Id == w.Current.SourceZoneId),
                     candles = view.Candles.ToDictionary(x => x.Key, x => x.Value.Where(c => c.Confirmed && c.CloseTime <= view.Cutoff).TakeLast(20).ToArray()),
-                    levels = view.Levels, dataStatus = view.Status, orderFlow = View.Flow,
+                    levels = view.Levels, dataStatus = view.Status, orderFlow = View.Flow, priceContext = view.PriceContext.Evidence(view.Cutoff),
                     gaps = view.Candles.Where(x => HasGap(x.Value, view.Cutoff)).Select(x => x.Key).ToArray() };
                 var alert = new AlertEvent(WatchRules.EventId(w), w.Scope, w.Id, w.Current.Revision,
                     DateTimeOffset.FromUnixTimeMilliseconds(quote.Timestamp), quote.Price, quote.Transport, w.Current,

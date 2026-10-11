@@ -19,10 +19,16 @@ public sealed class OkxClient(HttpClient http)
     {
         if (!Timeframes.All.Append("1W").Contains(timeframe)) throw new ArgumentException("Unsupported timeframe.");
         using var doc = await Get($"api/v5/market/candles?instId=BTC-USDT-SWAP&bar={timeframe}&limit=300", ct);
-        return doc.RootElement.GetProperty("data").EnumerateArray().Select(row => new Candle("BTC-USDT-SWAP", timeframe,
+        return ParseCandles(doc.RootElement.GetProperty("data"), timeframe);
+    }
+    public async Task<Candle[]> HistoryCandlesAsync(long after, CancellationToken ct)
+    {
+        using var doc = await Get($"api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=5m&limit=300&after={after}", ct);
+        return ParseCandles(doc.RootElement.GetProperty("data"), "5m");
+    }
+    private static Candle[] ParseCandles(JsonElement data, string timeframe) => data.EnumerateArray().Select(row => new Candle("BTC-USDT-SWAP", timeframe,
             long.Parse(row[0].GetString()!, CultureInfo.InvariantCulture), Decimal(row[1]), Decimal(row[2]), Decimal(row[3]), Decimal(row[4]), Decimal(row[5]), row[8].GetString() == "1"))
             .Where(c => c.Valid).OrderBy(c => c.OpenTime).ToArray();
-    }
     public async Task<PriceSample> TickerAsync(CancellationToken ct)
     {
         using var doc = await Get("api/v5/market/ticker?instId=BTC-USDT-SWAP", ct);

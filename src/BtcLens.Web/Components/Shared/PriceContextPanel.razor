@@ -1,0 +1,84 @@
+@inject MarketEngine Market
+@inject IJSRuntime JS
+@inject ISnackbar Snack
+<section class="panel price-context-panel" data-testid="price-context">
+    <div class="panel-heading"><div><span class="eyebrow">PRICE &amp; VOLUME CONTEXT</span><h2>成交量分布与 VWAP</h2></div><label class="context-timezone">VWAP 重置时区<select aria-label="VWAP 重置时区" value="@View.PriceContext.OffsetHours" @onchange="ChangeOffset"><option value="8">北京时间 UTC+8</option><option value="0">UTC</option></select></label></div>
+    <div class="vwap-grid">
+        @foreach (var v in View.PriceContext.Vwaps)
+        {
+            <div class="vwap-card" data-period="@v.Period" data-complete="@v.Coverage.Complete.ToString().ToLowerInvariant()"><div class="vwap-heading"><span>@(PriceContextRules.PeriodName(v.Period)) VWAP</span><span class="pill @(Usable(v) ? "green" : "amber")">@(Usable(v) ? "锚点覆盖完整" : "覆盖不完整 / 等待更新")</span></div><b class="mono">@LensFormat.Price(v.Value)</b><small>从 @LensFormat.Time(v.Anchor) · 截至 @LensFormat.Time(v.KnownAt)</small><div class="vwap-foot"><span>@v.Coverage.Observed / @v.Coverage.Expected 根 5m · @(Usable(v) ? "收盘近似" : "部分数据近似")</span><button class="text-button accent" disabled="@(!Usable(v))" @onclick="() => FromVwap(v)">＋ 关注</button></div></div>
+        }
+    </div>
+    <div class="context-status"><span>@View.PriceContext.Status · @View.ContextCandles.Length 根 5m</span><span>永续成交量：张数 × BTC 合约面值 · 已收盘 HLC3 近似</span></div>
+    @if (View.PriceContext.Error is not null) { <p class="inline-error">@View.PriceContext.Error</p> }
+    <div class="profile-heading"><div><h3>固定范围成交量分布</h3><p>圈选盘整区间，保存 VAH / POC / VAL。使用 5m K 线高低区间均匀分配近似。</p></div><div class="button-group"><button class="button small" @onclick="() => DrawRange.InvokeAsync()">图上选择时间范围</button><button class="button small primary" @onclick="NewRange">填写时间范围</button></div></div>
+    @if (View.PriceContext.Profiles.Length > 0)
+    {
+        <label class="profile-selector">已保存选区<select aria-label="已保存成交量选区" value="@SelectedId" @onchange="SelectProfile">@foreach (var p in View.PriceContext.Profiles) { <option value="@p.Id">@p.Name · @LensFormat.Time(p.Result.Start) — @LensFormat.Time(p.Result.End)</option> }</select></label>
+    }
+    @if (Selected is { } selected)
+    {
+        var r = selected.Result;
+        <div class="profile-detail" data-testid="profile-detail" data-profile-id="@selected.Id">
+            <div class="profile-levels">@foreach (var level in new[] { ("VAH", r.Vah), ("POC", r.Poc), ("VAL", r.Val) }) { <div><span>@level.Item1</span><b class="mono">@LensFormat.Price(level.Item2)</b><button class="text-button accent" @onclick="() => FromProfile(selected, level.Item1, level.Item2!.Value)">＋ 关注</button></div> }</div>
+            <div class="profile-coverage"><span class="pill @(r.Coverage.Complete ? "green" : "amber")">@(r.Coverage.Complete ? "选区覆盖完整" : "选区数据不完整")</span><span>@r.Coverage.Observed / @r.Coverage.Expected 根 · 缺失 @r.Coverage.Missing 根 · 冲突 @r.Coverage.Conflicts 组</span><span>@r.TotalBtc.ToString("0.########") BTC · @r.Rows.Length 行 · 价值区目标 @r.ValueAreaPercent%</span><button class="text-button push-right" @onclick="() => Export(selected)">导出选区证据 ↗</button></div>
+            <details><summary>选区来源与计算规则</summary><p class="muted">@LensFormat.Time(r.Start) 至 @LensFormat.Time(r.End)，右端不含；创建时点 @LensFormat.Time(selected.CreatedAt)。POC 使用最大成交量行的中点，并列取低价行；价值区从 POC 向较大相邻行扩展，直至达到或超过目标比例。</p><p class="muted">@r.Algorithm · 来源 SHA-256：<span class="source-hash">@r.SourceHash</span></p></details>
+        </div>
+    }
+    else { <div class="profile-empty">先选择一段时间，图上将显示成交量横条和 VAH / POC / VAL。</div> }
+</section>
+@if (form is not null)
+{
+    <div class="modal-backdrop"><section class="modal wide" role="dialog" aria-modal="true" aria-label="成交量选区编辑"><div class="modal-heading"><div><span class="eyebrow">FIXED RANGE · 5M APPROXIMATION</span><h2>保存成交量选区</h2></div><button class="icon-button" aria-label="关闭成交量选区" @onclick="Close">×</button></div>
+        <form @onsubmit="Save" @onsubmit:preventDefault><label>选区名称<input required maxlength="100" @bind="form.Name" /></label><div class="form-grid"><label>开始时间（北京时间，包含）<input type="datetime-local" required step="300" @bind="form.Start" /></label><label>结束时间（北京时间，不含）<input type="datetime-local" required step="300" @bind="form.End" /></label><label>成交量分布行数<input type="number" min="8" max="120" required @bind="form.Rows" /></label><label>价值区比例（%）<input type="number" min="1" max="100" required @bind="form.Area" /></label></div><p class="form-note">当前可用 5m 覆盖：@(View.ContextCandles.Length == 0 ? "等待数据" : LensFormat.Time(View.ContextCandles[0].OpenTime) + " 至 " + LensFormat.Time(View.ContextCandles[^1].CloseTime))。只计算截至当前回放时点的已收盘 K 线；缺失部分会单独标记。</p>
+        @if (preview is not null) { <div class="profile-preview" data-testid="profile-preview">POC <b>@LensFormat.Price(preview.Poc)</b> · VAH <b>@LensFormat.Price(preview.Vah)</b> · VAL <b>@LensFormat.Price(preview.Val)</b><p>覆盖 @preview.Coverage.Observed / @preview.Coverage.Expected 根，缺失 @preview.Coverage.Missing 根；@preview.TotalBtc.ToString("0.########") BTC。@(preview.Coverage.Complete ? "选区覆盖完整。" : "数据不完整，保存结果仅代表已覆盖部分。")</p></div> }
+        @if (error is not null) { <p class="inline-error">@error</p> }
+        <div class="modal-actions"><button type="button" class="button" @onclick="Preview">预览计算</button><button type="submit" class="button primary">保存选区</button></div></form></section></div>
+}
+@code {
+    [Parameter] public MarketView View { get; set; } = MarketView.Empty;
+    [Parameter] public string? SelectedId { get; set; }
+    [Parameter] public EventCallback<string> SelectedChanged { get; set; }
+    [Parameter] public EventCallback DrawRange { get; set; }
+    [Parameter] public EventCallback<(PriceReference Reference, string Timeframe)> LevelPicked { get; set; }
+    [Parameter] public string Timeframe { get; set; } = "5m";
+    private SavedProfile? Selected => View.PriceContext.Profiles.FirstOrDefault(p => p.Id == SelectedId);
+    private RangeForm? form;
+    private ProfileResult? preview;
+    private string? error, formScope;
+    private string previousScope = "";
+    protected override void OnParametersSet() { if (previousScope != View.Scope) { previousScope = View.Scope; Close(); } }
+    private bool Usable(VwapResult v) => v.Value is not null && v.Coverage.Complete && v.KnownAt <= View.Cutoff && View.Cutoff - v.KnownAt < 600_000 && v.Anchor == PriceContextRules.Anchor(View.Cutoff, v.Period, v.OffsetHours);
+    private async Task ChangeOffset(ChangeEventArgs e) => await Market.SetVwapOffsetAsync(int.Parse(e.Value!.ToString()!));
+    private Task SelectProfile(ChangeEventArgs e) => SelectedChanged.InvokeAsync(e.Value!.ToString()!);
+    private void NewRange()
+    {
+        var end = Math.Min(View.ContextCandles.LastOrDefault()?.CloseTime ?? View.Cutoff, View.Cutoff / PriceContextRules.Step * PriceContextRules.Step);
+        OpenRange(Math.Max(View.ContextCandles.FirstOrDefault()?.OpenTime ?? end - 3_600_000, end - 6 * 3_600_000), end);
+    }
+    public void OpenRange(long start, long end)
+    {
+        formScope = View.Scope; preview = null; error = null;
+        form = new() { Start = Local(start), End = Local(Math.Min(end, View.Cutoff / PriceContextRules.Step * PriceContextRules.Step)) };
+        StateHasChanged();
+    }
+    private void Close() { form = null; preview = null; error = null; }
+    private static DateTime Local(long time) => DateTimeOffset.FromUnixTimeMilliseconds(time).ToOffset(TimeSpan.FromHours(8)).DateTime;
+    private static long Timestamp(DateTime time) => new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Unspecified), TimeSpan.FromHours(8)).ToUnixTimeMilliseconds();
+    private void Preview()
+    {
+        try { var f = form!; preview = PriceContextRules.Profile(View.ContextCandles, Timestamp(f.Start), Timestamp(f.End), View.Cutoff,
+            View.Instrument ?? throw new ArgumentException("等待合约元数据。"), f.Rows, f.Area); error = null; }
+        catch (ArgumentException ex) { error = ex.Message; preview = null; }
+    }
+    private async Task Save()
+    {
+        try { var f = form!; var saved = await Market.SaveProfileAsync(f.Name, Timeframe, Timestamp(f.Start), Timestamp(f.End), f.Rows, f.Area, formScope!);
+            await SelectedChanged.InvokeAsync(saved.Id); Close(); Snack.Add("已保存选区与原始 5m 证据。", Severity.Success); }
+        catch (ArgumentException ex) { error = ex.Message; }
+    }
+    private Task FromProfile(SavedProfile p, string role, decimal price) => LevelPicked.InvokeAsync((new("profile", p.Id, p.Name + " · " + role, price, p.CreatedAt, p.Result.Algorithm, p.Result.SourceHash), p.DisplayTimeframe));
+    private Task FromVwap(VwapResult v) => LevelPicked.InvokeAsync((new("vwap", $"vwap:{View.Scope}:{v.Period}:{v.OffsetHours}:{v.KnownAt}", PriceContextRules.PeriodName(v.Period) + " VWAP", v.Value!.Value, v.KnownAt, PriceContextRules.VwapVersion, v.SourceHash), Timeframe));
+    private async Task Export(SavedProfile p) { await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/files.js"); await module.InvokeVoidAsync("download", "btclens-volume-profile.json", JsonCodec.Write(p)); }
+    private sealed class RangeForm { public string Name { get; set; } = "盘整区间"; public DateTime Start { get; set; } public DateTime End { get; set; } public int Rows { get; set; } = 40; public decimal Area { get; set; } = 70; }
+}

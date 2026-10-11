@@ -16,6 +16,9 @@ public interface ILensStore
     void SaveTrade(Trade trade);
     int ImportTrades(IReadOnlyList<Trade> trades);
     void SaveCandles(string scope, IEnumerable<Candle> candles);
+    Candle[] ReadCandles(string scope);
+    SavedProfile[] Profiles(string scope);
+    void SaveProfile(SavedProfile profile);
     FlowSegment[] FlowSegments(int limit = 40);
     CvdPoint[] CvdPoints(long since, int limit = 3000);
     OpenInterestSample[] OpenInterest(long since, int limit = 3000);
@@ -28,7 +31,10 @@ public interface ILensStore
 
 public sealed record ImportPreview(Trade[] Trades, string[] Errors);
 public sealed record AnalysisPacket(string GeneratedAt, string Mode, string Transport,
-    string DataStatus, string[] Observations, string[] Missing, string[] NextSteps);
+    string DataStatus, string[] Observations, string[] Missing, string[] NextSteps)
+{
+    public object? PriceContext { get; init; }
+}
 
 public static class AnalysisReport
 {
@@ -41,6 +47,21 @@ public static class AnalysisReport
         foreach (var z in market.Zones.Where(z => z.Life is ZoneLife.Active or ZoneLife.Touched).OrderByDescending(z => z.KnownAt).Take(6))
             facts.Add($"{z.Timeframe} {z.Kind} {z.Bias}，{z.Lower:0.0}–{z.Upper:0.0}，确认时间 {DateTimeOffset.FromUnixTimeMilliseconds(z.KnownAt):O}，算法 {z.Algorithm}；证据 ID {z.Id}。");
         var missing = new List<string> { "主目标及其来源资格尚未人工确认。", "Sweep、SFP 与有效 MSB 的个人规则尚待逐项定义。" };
+        foreach (var v in market.PriceContext.Vwaps)
+        {
+            var label = PriceContextRules.PeriodName(v.Period) + " VWAP";
+            if (v.Value is not null && v.Coverage.Complete && v.KnownAt <= market.Cutoff &&
+                v.Anchor == PriceContextRules.Anchor(market.Cutoff, v.Period, v.OffsetHours) && market.Cutoff - v.KnownAt < 600_000)
+                facts.Add($"{label} {v.Value:0.0}，UTC+{v.OffsetHours} 重置；5m 收盘 HLC3 × BTC 成交量近似，覆盖 {v.Coverage.Observed}/{v.Coverage.Expected}，截至 {DateTimeOffset.FromUnixTimeMilliseconds(v.KnownAt):O}；来源摘要 {v.SourceHash}。" );
+            else missing.Add($"{label} 当前锚点数据不完整、过期或无成交量；覆盖 {v.Coverage.Observed}/{v.Coverage.Expected}，不能作为完整周期参考。");
+        }
+        foreach (var p in market.PriceContext.Profiles.Where(p => p.CreatedAt <= market.Cutoff && p.Result.End <= market.Cutoff).Take(4))
+        {
+            var r = p.Result;
+            facts.Add($"固定范围「{p.Name}」POC {r.Poc:0.0} / VAH {r.Vah:0.0} / VAL {r.Val:0.0}，范围 {DateTimeOffset.FromUnixTimeMilliseconds(r.Start):O} 至 {DateTimeOffset.FromUnixTimeMilliseconds(r.End):O}；5m 区间均匀分配近似，覆盖 {r.Coverage.Observed}/{r.Coverage.Expected}，证据 ID {p.Id}，算法 {r.Algorithm}。");
+            if (!r.Coverage.Complete) missing.Add($"固定范围「{p.Name}」存在缺失或冲突数据；计算仅代表已覆盖部分。");
+        }
+        if (market.PriceContext.Error is not null) missing.Add(market.PriceContext.Error);
         foreach (var instrument in FlowRules.Instruments)
         {
             var segment = market.Flow.Latest(instrument);
@@ -53,6 +74,7 @@ public static class AnalysisReport
         else missing.Add("永续 OI 未采集、已过期或为合成演示。");
         return new(DateTimeOffset.FromUnixTimeMilliseconds(market.Cutoff).ToString("O"), market.Mode, market.Transport, market.Status,
             facts.ToArray(), missing.ToArray(),
-            ["在日线/4H 确认关注区和目标的不同角色。", "价格到区后观察 15m/5m 反应，记录支持与冲突证据。", "目标、确认与失效依据齐全后，再填写候选交易计划。"]);
+            ["在日线/4H 确认关注区和目标的不同角色。", "对照选区 VAH/POC/VAL 与日/周/月 VWAP，记录价格所处位置。", "价格到区后观察 15m/5m 反应，记录支持与冲突证据。", "目标、确认与失效依据齐全后，再填写候选交易计划。"])
+            { PriceContext = market.PriceContext.Evidence(market.Cutoff) };
     }
 }

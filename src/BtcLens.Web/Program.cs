@@ -21,6 +21,7 @@ builder.Services.AddSingleton<MarketEngine>();
 builder.Services.AddSingleton<OrderFlowEngine>();
 builder.Services.AddHostedService<MarketWorker>();
 builder.Services.AddHostedService<OrderFlowWorker>();
+builder.Services.AddHostedService<PriceContextWorker>();
 
 var app = builder.Build();
 
@@ -39,6 +40,9 @@ app.MapGet("/healthz", (MarketEngine market) =>
     return Results.Json(new { app = "BTC Lens", mode = state.Mode, status = state.Status, transport = state.Transport,
         instrument = state.Instrument?.Id, quoteTimestamp = state.Quote?.Timestamp,
         candleCounts = state.Candles.ToDictionary(x => x.Key, x => x.Value.Length),
+        priceContext = new { state.PriceContext.Status, state.PriceContext.Error, state.PriceContext.OffsetHours,
+            candles = state.ContextCandles.Length, profiles = state.PriceContext.Profiles.Length,
+            vwaps = state.PriceContext.Vwaps.Select(v => new { v.Period, v.Anchor, v.KnownAt, v.Value, v.Coverage }) },
         orderFlow = new { state.Flow.Status, state.Flow.Error, state.Flow.OiError, state.Flow.AsOf,
             instruments = BtcLens.Core.FlowRules.Instruments.Select(i => state.Flow.Latest(i)).Where(s => s is not null),
             cvdPoints = state.Flow.Points.Length, oiSamples = state.Flow.OpenInterest.Length,

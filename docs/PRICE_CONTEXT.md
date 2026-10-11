@@ -1,0 +1,53 @@
+# 固定范围成交量分布与 VWAP · V0.2.1
+
+在行情雷达中点击「成交量选区」，依次点击起始和结束 K 线，或者点击「填写时间范围」。预览后保存，图表显示成交量横条以及 VAH、POC、VAL。可直接从这些价位建立关注区；默认上下各 25 USDT 仅供编辑起点，保存前按自己的判断调整。
+
+## 数据与范围
+
+- 统一使用 BTC-USDT-SWAP 的已确认 5m K 线，不因图表周期切换而更换计算源。
+- 时间范围包含起点、不含终点；选择结束 K 线时包含该根已收盘部分。表单为北京时间，必须为 5m 边界，最长 40 天。
+- 实时模式使用独立历史分页，补充当前周/月起点所需的 5m 数据，同时覆盖 UTC 与 UTC+8。默认加载并不保证拥有过去 40 天的全部数据，界面列出实际范围。
+- 已确认历史缓存在 SQLite。重启后复用已有数据，再补缺口；内存保留最近 40 天，数据库中的缓存不自动清理。
+- 只使用有效、已确认且收盘时间不晚于截止点的 K 线。相同数据去重，冲突数据不参与计算；缺失、冲突、无效数量分别显示。
+- 数量来自 OKX K 线 `vol`（合约张数），乘当时的 BTC 合约面值换算 BTC。不把合约张数当作 BTC。
+
+## 固定范围算法
+
+版本：`Candle-Uniform-Profile/1.0:VA-CrossTarget:POC-LowerTie`。
+
+价格区间按合约 tick 对齐。行宽向上对齐 tick，因此实际行数可能少于所填行数。每根 5m K 线的 BTC 成交量按高低区间与各价格行的重合长度分配；完全平价的 K 线归入该价格所在行。Decimal 尾差归入最后非零行以保持总量。
+
+POC 为最大成交量行的中点；并列取低价行。价值区从 POC 开始，每次加入上下相邻行中量较大的一行；相同量先取更靠近 POC 的行，再并列取上方。持续到达到或超过目标比例，默认 70%。VAH/VAL 为纳入行的上下边界。
+
+这是独立定义的 K 线近似算法，无法复原逐笔成交所在价格，也不承诺与 TradingView、LuxAlgo 的结果一致。尤其价值区采用整行达到或越过比例的规则，与 TradingView 当前文档中加入下一行前的停止条件不同。
+
+保存时冻结范围、计算版本、合约元数据、结果、原始 5m K 线与来源 SHA-256。调整范围建立新选区；页面列出最近 20 个，历史记录仍在数据库中。数据不完整时仍可保存部分计算，但明显显示覆盖数量。
+
+## 日/周/月 VWAP
+
+版本：`Closed-5m-HLC3-VWAP/1.0`。
+
+`VWAP = Σ[((H + L + C) / 3) × BTC 成交量] / Σ[BTC 成交量]`。
+
+默认 UTC+8，也可改为 UTC；日线在当地 00:00 重置，周一 00:00 为周起点，月起点为日历月第一天。计算当前日/周/月的曲线与数值。历史窗口不足、缺失 K 线或无成交量时不标为完整；缺口前后画为不同线段，部分数据曲线用虚线。
+
+点的可用时间为 5m 收盘时间。图表在各可见 K 线开盘时只取此前已知的最新点，并在最后一个确认时间追加最新点；高周期图不会提前绘制未来 5m 数据。未收盘 5m K 线不参与计算。显示时区切换不改变 OHLC 图表的北京时间标尺。
+
+观察报告只把当前锚点覆盖完整、收盘时间不晚于截止点且距截止点不足 10 分钟的 VWAP 列为可用参考；其他状态列入缺失证据。实时历史加载状态独立显示，历史请求失败不会替代或清空已有 CVD。
+
+## 关注、快照与复算
+
+从位置建立关注区会保留参考类型、证据 ID、角色/名称、保存时价格、可用时间、算法与来源摘要。之后手动调整边界、创建新版关注区、切换时区，都保留旧事件和交易快照。
+
+选区可导出 JSON，含冻结的原始 K 线；观察报告、到区事件和交易记录包含当时的选区结果与 VWAP 汇总。完整数据覆盖只描述软件输入的完整性，不赋予主目标资格或局部交易确认。
+
+`tools/audit-price-context.py` 使用独立 Python Decimal 复算导出的成交量分布。也可同时提供分析 JSON 与 SQLite 路径，复算三个 VWAP。示例：
+
+~~~powershell
+python tools/audit-price-context.py profile.json
+python tools/audit-price-context.py live-profile.json live-analysis.json test-results/v021-browser.db
+~~~
+
+离线浏览器检查：`pnpm test:price-context`；真实 OKX 历史检查：`node tools/check-context-live.cjs`，使用独立测试实例，后者不纳入离线 CI。
+
+来源：[OKX 公共行情与历史 K 线 API](https://app.okx.com/docs-v5/en/#order-book-trading-market-data-get-candlesticks-history)、[TradingView 成交量分布概念](https://www.tradingview.com/support/solutions/43000502040-volume-profile-indicators-basic-concepts/)、[TradingView VWAP 定义](https://www.tradingview.com/support/solutions/43000502018-volume-weighted-average-price-vwap/)。代码为自有实现。

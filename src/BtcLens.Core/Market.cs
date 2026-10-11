@@ -34,6 +34,8 @@ public sealed record MarketView(string Mode, string Scope, string Status, string
     DetectedZone[] Zones, KeyLevel[] Levels, int ReplayIndex, int ReplayTotal)
 {
     public FlowView Flow { get; init; } = FlowView.Empty;
+    public Candle[] ContextCandles { get; init; } = [];
+    public PriceContextView PriceContext { get; init; } = PriceContextView.Empty;
     public static MarketView Empty => new("demo", "demo", "正在初始化", "离线回放", null, null, null, 0,
         new Dictionary<string, Candle[]>(), [], [], 0, 0);
 }

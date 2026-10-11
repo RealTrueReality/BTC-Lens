@@ -24,9 +24,10 @@ else
 <div class="radar-grid">
     <section class="panel chart-panel">
         <div class="panel-heading"><div class="instrument-title"><span class="btc-icon">₿</span><div><b>Bitcoin <span class="muted">/ USDT</span></b><small>OKX · 永续合约 · @timeframe</small></div></div><div class="timeframes">@foreach (var tf in Timeframes.All) { <button class="@(timeframe == tf ? "active" : "")" @onclick="() => timeframe = tf">@tf</button> }</div></div>
-        <div class="chart-toolbar"><div class="layer-options"><label><input type="checkbox" @bind="showFvg" /><span class="legend-dot green"></span>FVG</label><label><input type="checkbox" @bind="showOb" /><span class="legend-dot red"></span>OB</label><label><input type="checkbox" @bind="showLevels" />关键价格</label><label><input type="checkbox" @bind="showHtf" />1D / 4H 投影</label></div><button class="text-button @(drawing ? "accent" : "")" @onclick="() => drawing = !drawing">◇ @(drawing ? "取消选区" : "图上选区")</button></div>
-        @if (drawing) { <div class="drawing-hint">在图上依次点击两个价格位置，选定关注区边界。</div> }
-        <CandleChart Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Drawing="drawing" Scope="@view.Scope" RegionSelected="Picked" />
+        <div class="chart-toolbar"><div class="layer-options"><label><input type="checkbox" @bind="showFvg" /><span class="legend-dot green"></span>FVG</label><label><input type="checkbox" @bind="showOb" /><span class="legend-dot red"></span>OB</label><label><input type="checkbox" @bind="showLevels" />关键价格</label><label><input type="checkbox" @bind="showHtf" />1D / 4H 投影</label></div><button class="text-button @(drawing ? "accent" : "")" @onclick="ToggleWatchDrawing">◇ @(drawing ? "取消选区" : "图上选区")</button></div>
+        <div class="chart-toolbar context-layers"><div class="layer-options"><label><input type="checkbox" @bind="showDayVwap" /><span class="legend-dot green"></span>日 VWAP</label><label><input type="checkbox" @bind="showWeekVwap" /><span class="legend-dot amber"></span>周 VWAP</label><label><input type="checkbox" @bind="showMonthVwap" />月 VWAP</label><label><input type="checkbox" @bind="showProfile" />固定范围分布</label></div><button class="text-button @(rangeDrawing ? "accent" : "")" @onclick="ToggleRangeDrawing">@(rangeDrawing ? "取消时间选区" : "成交量选区")</button></div>
+        @if (drawing || rangeDrawing) { <div class="drawing-hint">@(rangeDrawing ? "在图上依次点击起始和结束 K 线，选择时间范围。" : "在图上依次点击两个价格位置，选定关注区边界。")</div> }
+        <CandleChart Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Drawing="drawing" RangeDrawing="rangeDrawing" Scope="@view.Scope" RegionSelected="Picked" TimeRangeSelected="RangePicked" Profile="@(showProfile ? SelectedProfile : null)" Vwaps="ChartVwaps" />
         <div class="chart-caption"><span><span class="legend-dot amber"></span>虚线区域：你的关注区</span><span>时间：UTC+8 · 自动区域在确认后显示</span></div>
     </section>
     <section class="panel watch-panel"><div class="panel-heading"><h2>我的关注区 <span class="count-badge">@watches.Length</span></h2><button class="icon-button" aria-label="新增关注区" @onclick="NewWatch">＋</button></div>
@@ -36,11 +37,13 @@ else
             {
                 <div class="watch-card @(!w.Enabled ? "paused" : "")"><div class="watch-top"><span class="pill @(w.Current.Bias == Bias.Bullish ? "green" : w.Current.Bias == Bias.Bearish ? "red" : "")">@w.Current.Timeframe · @LensFormat.BiasName(w.Current.Bias)</span><span class="watch-status @(w.Triggered ? "accent" : "")">@(w.Triggered ? "已到区" : !w.Enabled ? "已暂停" : view.Quote is not null && WatchRules.Inside(w.Current, view.Quote.Price) ? "当前在区内" : "等待到区")</span></div><h3>@w.Current.Name</h3><div class="watch-price mono">@LensFormat.Price(w.Current.Lower) <span>—</span> @LensFormat.Price(w.Current.Upper)</div><p>@w.Current.Notes</p>
                     @if (w.Current.SourceZoneId is not null) { <small class="source-note">来源状态：@(view.Zones.FirstOrDefault(z => z.Id == w.Current.SourceZoneId) is { } origin ? LensFormat.Life(origin.Life) : "当前窗口未覆盖") · 手动边界保留</small> }
+                    @if (w.Current.PriceReference is { } reference) { <small class="source-note">参考来源：@reference.Label · 保存时 @LensFormat.Price(reference.Price) · @LensFormat.Time(reference.KnownAt)</small> }
                     <div class="watch-actions"><small>v@(w.Current.Revision) · 首次观测进入</small><div><button class="text-button" @onclick="() => EditWatch(w)">编辑</button><button class="text-button" @onclick="() => Market.ToggleWatchAsync(w.Id)">@(w.Enabled ? "暂停" : "启用")</button></div></div></div>
             }
         </div><div class="panel-tip">到区记录帮助你回看价格反应；确认条件与目标由你判断。</div>
     </section>
 </div>
+<PriceContextPanel @ref="contextPanel" View="view" SelectedId="@selectedProfileId" SelectedChanged="SelectProfile" DrawRange="ToggleRangeDrawing" LevelPicked="FromPriceReference" Timeframe="@timeframe" />
 <OrderFlowPanel Flow="view.Flow" />
 <div class="lower-grid">
     <section class="panel"><div class="panel-heading"><h2>自动参考区域</h2><span class="subtle-label">当前周期 @(showHtf ? "+ 大周期" : "")</span></div><div class="table-wrap"><table><thead><tr><th>类型 / 周期</th><th>价格范围</th><th>状态</th><th>确认时间</th><th></th></tr></thead><tbody>
@@ -75,6 +78,11 @@ else
     private AlertEvent[] alerts = [];
     private string timeframe = "5m";
     private bool showFvg = true, showOb = true, showLevels = false, showHtf, drawing, busy;
+    private bool rangeDrawing, showDayVwap = true, showWeekVwap = true, showMonthVwap = true, showProfile = true;
+    private string? selectedProfileId;
+    private PriceContextPanel? contextPanel;
+    private SavedProfile? SelectedProfile => view.PriceContext.Profiles.FirstOrDefault(p => p.Id == selectedProfileId);
+    private VwapResult[] ChartVwaps => view.PriceContext.Vwaps.Where(v => v.Period switch { "day" => showDayVwap, "week" => showWeekVwap, _ => showMonthVwap }).ToArray();
     private WatchEditor? editor;
     private string? editingId, editorScope, formError;
     private int? editingRevision;
@@ -88,7 +96,7 @@ else
         .Where(z => z.Kind == ZoneKind.Fvg ? showFvg : showOb).OrderByDescending(z => z.KnownAt);
     private DetectedZone[] ChartZones => VisibleZones.Take(24).ToArray();
     protected override void OnInitialized() { Reload(); Market.Changed += Changed; }
-    private void Reload() { var oldScope = view.Scope; view = Market.View; watches = Store.Watches(view.Scope); alerts = Store.Alerts(view.Scope); if (oldScope != view.Scope) { CloseEditor(); selectedAlert = null; report = null; } }
+    private void Reload() { var oldScope = view.Scope; view = Market.View; watches = Store.Watches(view.Scope); alerts = Store.Alerts(view.Scope); if (oldScope != view.Scope) { CloseEditor(); selectedAlert = null; report = null; drawing = rangeDrawing = false; selectedProfileId = Store.GetSetting("selected-profile:" + view.Scope) ?? view.PriceContext.Profiles.FirstOrDefault()?.Id; } }
     private void Changed()
     {
         var now = Environment.TickCount64;
@@ -99,12 +107,22 @@ else
     private async Task NewReplay() { await Market.NewReplayAsync(); Reload(); Snack.Add("已开启新的回放工作区；历史事件仍保存在本地。", Severity.Info); }
     private void NewWatch() { editingId = null; editingRevision = null; editingHistory = []; editorScope = view.Scope; formError = null; var price = view.Quote?.Price ?? 67000; editor = new() { Lower = price - 150, Upper = price - 50, Timeframe = timeframe }; }
     private void FromZone(DetectedZone zone) { NewWatch(); editor = new() { Name = zone.Timeframe + " " + LensFormat.Kind(zone.Kind) + " 观察", Lower = zone.Lower, Upper = zone.Upper, Timeframe = zone.Timeframe, Bias = zone.Bias, Notes = "参考 " + zone.Algorithm + "；等待到区后观察局部反应。", SourceId = zone.Id }; }
-    private void EditWatch(WatchZone w) { editingId = w.Id; editingRevision = w.Current.Revision; editingHistory = [.. w.History, w.Current]; editorScope = view.Scope; formError = null; var v = w.Current; editor = new() { Name = v.Name, Lower = v.Lower, Upper = v.Upper, Timeframe = v.Timeframe, Bias = v.Bias, Notes = v.Notes, SourceId = v.SourceZoneId }; }
+    private void EditWatch(WatchZone w) { editingId = w.Id; editingRevision = w.Current.Revision; editingHistory = [.. w.History, w.Current]; editorScope = view.Scope; formError = null; var v = w.Current; editor = new() { Name = v.Name, Lower = v.Lower, Upper = v.Upper, Timeframe = v.Timeframe, Bias = v.Bias, Notes = v.Notes, SourceId = v.SourceZoneId, Reference = v.PriceReference }; }
     private void Picked((decimal Lower, decimal Upper) region) { drawing = false; NewWatch(); editor!.Lower = region.Lower; editor.Upper = region.Upper; }
+    private void ToggleRangeDrawing() { drawing = false; rangeDrawing = !rangeDrawing; }
+    private void ToggleWatchDrawing() { rangeDrawing = false; drawing = !drawing; }
+    private void RangePicked((long Start, long End) range) { rangeDrawing = false; contextPanel?.OpenRange(range.Start, range.End); }
+    private void SelectProfile(string id) { selectedProfileId = id; Store.SetSetting("selected-profile:" + view.Scope, id); Reload(); }
+    private void FromPriceReference((PriceReference Reference, string Timeframe) source)
+    {
+        NewWatch(); var r = source.Reference; var padding = Math.Max(view.Instrument?.TickSize ?? .1m, 25m);
+        editor = new() { Name = r.Label + " 观察", Lower = Math.Max(.1m, Math.Floor((r.Price - padding) * 10) / 10), Upper = Math.Ceiling((r.Price + padding) * 10) / 10,
+            Timeframe = source.Timeframe, Notes = "参考 " + r.Label + "，保存时价位 " + r.Price.ToString("0.0") + "；按自己的判断调整关注区宽度。", Reference = r };
+    }
     private void CloseEditor() { editor = null; formError = null; }
     private async Task SaveWatch()
     {
-        try { if (editorScope != Market.View.Scope) throw new ArgumentException("工作区已变化，请重新建立关注区。"); var e = editor!; await Market.SaveWatchAsync(editingId, editingRevision, new(0, e.Name, e.Lower, e.Upper, e.Timeframe, e.Bias, e.Notes, e.SourceId, default)); CloseEditor(); Reload(); Snack.Add("关注区已保存，首次到区监控已启用。", Severity.Success); }
+        try { if (editorScope != Market.View.Scope) throw new ArgumentException("工作区已变化，请重新建立关注区。"); var e = editor!; await Market.SaveWatchAsync(editingId, editingRevision, new WatchVersion(0, e.Name, e.Lower, e.Upper, e.Timeframe, e.Bias, e.Notes, e.SourceId, default) { PriceReference = e.Reference }); CloseEditor(); Reload(); Snack.Add("关注区已保存，首次到区监控已启用。", Severity.Success); }
         catch (ArgumentException ex) { formError = ex.Message; }
     }
     private void OpenReport() => report = AnalysisReport.Build(view, watches);
@@ -113,5 +131,5 @@ else
     private Task ExportAlert() => Download("btclens-event.json", JsonCodec.Write(selectedAlert));
     private Task ExportReport() => Download("btclens-analysis.json", JsonCodec.Write(report));
     public void Dispose() => Market.Changed -= Changed;
-    private sealed class WatchEditor { public string Name { get; set; } = "我的关注区"; public decimal Lower { get; set; } public decimal Upper { get; set; } public string Timeframe { get; set; } = "5m"; public Bias Bias { get; set; } public string Notes { get; set; } = ""; public string? SourceId { get; set; } }
+    private sealed class WatchEditor { public string Name { get; set; } = "我的关注区"; public decimal Lower { get; set; } public decimal Upper { get; set; } public string Timeframe { get; set; } = "5m"; public Bias Bias { get; set; } public string Notes { get; set; } = ""; public string? SourceId { get; set; } public PriceReference? Reference { get; set; } }
 }

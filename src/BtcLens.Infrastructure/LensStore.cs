@@ -15,6 +15,9 @@ public sealed class LensStore : ILensStore, IDisposable
             IsAutoCloseConnection = true, InitKeyType = InitKeyType.Attribute });
         db.CodeFirst.InitTables<SettingRow, WatchRow, AlertRow, TradeRow, CandleRow>();
         db.CodeFirst.InitTables<FlowSegmentRow, CvdRow, CapturedTradeRow, OpenInterestRow>();
+        db.CodeFirst.InitTables<ProfileRowEntity>();
+        db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_profile_scope ON volume_profiles(Scope,Timestamp)");
+        db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_candle_scope ON candle_cache(Scope)");
         db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_watch_scope ON watch_zones(Scope)");
         db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_alert_scope ON alert_events(Scope)");
         db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_trade_mode ON trades(Mode)");
@@ -89,6 +92,23 @@ public sealed class LensStore : ILensStore, IDisposable
         lock (sync) db.Storageable(rows).ExecuteCommand();
     }
     private static WatchRow Watch(WatchZone w) => new() { Id = w.Id, Scope = w.Scope, Json = JsonCodec.Write(w) };
+    public Candle[] ReadCandles(string scope)
+    { lock (sync) return db.Queryable<CandleRow>().Where(x => x.Scope == scope).ToList().Select(x => JsonCodec.Read<Candle>(x.Json)).OrderBy(x => x.OpenTime).ToArray(); }
+    public SavedProfile[] Profiles(string scope)
+    { lock (sync) return db.Queryable<ProfileRowEntity>().Where(x => x.Scope == scope).OrderByDescending(x => x.Timestamp).Take(20).ToList().Select(x => JsonCodec.Read<SavedProfile>(x.Json)).ToArray(); }
+    public void SaveProfile(SavedProfile profile)
+    {
+        lock (sync)
+        {
+            var existing = db.Queryable<ProfileRowEntity>().InSingle(profile.Id);
+            if (existing is not null)
+            {
+                if (existing.Json != JsonCodec.Write(profile)) throw new ArgumentException("已保存的固定范围计算保持原样；调整范围请新建选区。");
+                return;
+            }
+            db.Insertable(new ProfileRowEntity { Id = profile.Id, Scope = profile.Scope, Timestamp = profile.CreatedAt, Json = JsonCodec.Write(profile) }).ExecuteCommand();
+        }
+    }
     public FlowSegment[] FlowSegments(int limit = 40)
     { lock (sync) return db.Queryable<FlowSegmentRow>().OrderByDescending(x => x.Timestamp).Take(Math.Clamp(limit, 1, 100)).ToList().Select(x => JsonCodec.Read<FlowSegment>(x.Json)).ToArray(); }
     public CvdPoint[] CvdPoints(long since, int limit = 3000)
@@ -162,3 +182,6 @@ public sealed class CvdRow { [SugarColumn(IsPrimaryKey = true)] public string Id
 public sealed class CapturedTradeRow { [SugarColumn(IsPrimaryKey = true)] public string Id { get; set; } = ""; public string SegmentId { get; set; } = ""; public long Timestamp { get; set; } [SugarColumn(ColumnDataType = "text")] public string Json { get; set; } = ""; }
 [SugarTable("open_interest")]
 public sealed class OpenInterestRow { [SugarColumn(IsPrimaryKey = true)] public string Id { get; set; } = ""; public long Timestamp { get; set; } [SugarColumn(ColumnDataType = "text")] public string Json { get; set; } = ""; }
+
+[SugarTable("volume_profiles")]
+public sealed class ProfileRowEntity { [SugarColumn(IsPrimaryKey = true)] public string Id { get; set; } = ""; public string Scope { get; set; } = ""; public long Timestamp { get; set; } [SugarColumn(ColumnDataType = "text")] public string Json { get; set; } = ""; }

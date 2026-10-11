@@ -101,7 +101,7 @@
             if (formMode != Market.View.Mode) throw new ArgumentException("模式已变化，请重新打开交易编辑。");
             var f = form!; var market = Market.View;
             var snapshot = editing is not null ? editing.EntrySnapshotJson : JsonCodec.Write(new { capturedAt = DateTimeOffset.UtcNow, market.Cutoff, market.Mode, market.Quote, market.Instrument,
-                orderFlow = market.Flow, context = AnalysisReport.Build(market, Store.Watches(market.Scope)) });
+                orderFlow = market.Flow, priceContext = market.PriceContext.Evidence(market.Cutoff), context = AnalysisReport.Build(market, Store.Watches(market.Scope)) });
             var t = (editing ?? new Trade { Mode = mode }) with { Side = f.Side, EntryPrice = f.EntryPrice, QuantityBtc = f.Quantity,
                 EntryTime = editing?.EntryTime ?? new DateTimeOffset(DateTime.SpecifyKind(f.EntryLocal, DateTimeKind.Unspecified), TimeSpan.FromHours(8)),
                 InitialStop = f.Stop, Target = f.Target, ExitPrice = f.Closed ? f.ExitPrice : null,

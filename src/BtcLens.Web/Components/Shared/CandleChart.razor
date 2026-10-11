@@ -8,8 +8,12 @@
     [Parameter] public KeyLevel[] Levels { get; set; } = [];
     [Parameter] public bool ShowLevels { get; set; } = true;
     [Parameter] public bool Drawing { get; set; }
+    [Parameter] public bool RangeDrawing { get; set; }
+    [Parameter] public SavedProfile? Profile { get; set; }
+    [Parameter] public VwapResult[] Vwaps { get; set; } = [];
     [Parameter] public string Scope { get; set; } = "";
     [Parameter] public EventCallback<(decimal Lower, decimal Upper)> RegionSelected { get; set; }
+    [Parameter] public EventCallback<(long Start, long End)> TimeRangeSelected { get; set; }
     private ElementReference host;
     private IJSObjectReference? module;
     private IJSObjectReference? chart;
@@ -28,14 +32,32 @@
             if (chart is null) return;
             var nextIdentity = Scope + ":" + Candles.FirstOrDefault()?.Timeframe;
             var reset = identity != nextIdentity; identity = nextIdentity;
-            await chart.InvokeVoidAsync("update", Candles.Select(c => new { time = c.OpenTime / 1000, open = c.Open, high = c.High, low = c.Low, close = c.Close, volume = c.Volume, confirmed = c.Confirmed }),
+            await chart.InvokeVoidAsync("update", Candles.Select(c => new { time = c.OpenTime / 1000, closeTime = c.CloseTime / 1000, open = c.Open, high = c.High, low = c.Low, close = c.Close, volume = c.Volume, confirmed = c.Confirmed }),
                 Zones.Select(z => new { id = z.Id, lower = z.Lower, upper = z.Upper, from = z.KnownAt / 1000, kind = LensFormat.Kind(z.Kind), bias = z.Bias.ToString(), label = z.Timeframe + " " + LensFormat.Kind(z.Kind) }),
                 Watches.Where(w => w.Enabled).Select(w => new { id = w.Id, lower = w.Current.Lower, upper = w.Current.Upper, from = w.Current.CreatedAt.ToUnixTimeMilliseconds() / 1000, label = w.Current.Name }),
-                ShowLevels ? Levels.Select(l => new { name = l.Name, price = l.Price }).ToArray() : [], Drawing, reset);
+                ShowLevels ? Levels.Select(l => new { name = l.Name, price = l.Price }).ToArray() : [], Drawing, reset,
+                Profile is null ? null : new { Profile.Id, start = Profile.Result.Start / 1000, end = Profile.Result.End / 1000,
+                    Profile.Result.Rows, Profile.Result.Poc, Profile.Result.Vah, Profile.Result.Val, Profile.Result.PocRow, Profile.Result.VaLowRow, Profile.Result.VaHighRow }, ChartVwapData(), RangeDrawing);
         }
         catch (JSDisconnectedException) { }
     }
     [JSInvokable] public Task Picked(double first, double second) => RegionSelected.InvokeAsync(((decimal)Math.Round(Math.Min(first, second), 1), (decimal)Math.Round(Math.Max(first, second), 1)));
+    [JSInvokable] public Task PickedRange(long start, long end) => TimeRangeSelected.InvokeAsync((start * 1000, end * 1000));
+    private object[] ChartVwapData()
+    {
+        return Vwaps.Select(v =>
+        {
+            var points = new List<object>(); var index = 0; VwapPoint? latest = null;
+            foreach (var c in Candles)
+            {
+                while (index < v.Points.Length && v.Points[index].KnownAt <= c.OpenTime) latest = v.Points[index++];
+                if (latest is not null) points.Add(new { time = c.OpenTime / 1000, value = latest.Value, segment = latest.Segment });
+            }
+            if (Candles.Length > 0 && v.Points.LastOrDefault() is { } last && last.KnownAt > Candles[^1].OpenTime)
+                points.Add(new { time = last.KnownAt / 1000, value = last.Value, segment = last.Segment });
+            return (object)new { v.Period, complete = v.Coverage.Complete, points };
+        }).ToArray();
+    }
     public async ValueTask DisposeAsync()
     {
         try { if (chart is not null) { await chart.InvokeVoidAsync("dispose"); await chart.DisposeAsync(); } if (module is not null) await module.DisposeAsync(); }

@@ -1,7 +1,10 @@
 namespace BtcLens.Core;
 
 public sealed record WatchVersion(int Revision, string Name, decimal Lower, decimal Upper,
-    string Timeframe, Bias Bias, string Notes, string? SourceZoneId, DateTimeOffset CreatedAt);
+    string Timeframe, Bias Bias, string Notes, string? SourceZoneId, DateTimeOffset CreatedAt)
+{
+    public PriceReference? PriceReference { get; init; }
+}
 public sealed record WatchZone(string Id, string Scope, bool Enabled, bool Triggered,
     WatchVersion Current, WatchVersion[] History, PriceSample? LastSample = null);
 public sealed record AlertEvent(string Id, string Scope, string WatchId, int Revision,

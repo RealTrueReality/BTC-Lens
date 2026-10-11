@@ -6,11 +6,13 @@
 
 BTC Lens combines a BTC market radar, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data or deterministic offline replay.
 
-**当前 V0.2**：加入现货/永续实时 CVD、永续 OI、分段采集记录与成交证据导出。保持程序运行即可累积自己的订单流历史。
+**当前 V0.2.1**：固定范围成交量分布、VAH / POC / VAL、日/周/月 VWAP 已加入。位置可转为关注区，计算来源与结果随报告、到区事件和交易记录保存。实时 CVD / OI 保持持续采集。
 
 ![行情雷达](docs/screenshots/radar.png)
 
 [V0.1 核心闭环演示：约 3 分钟（带字幕，无配音）](docs/demo.webm)
+
+[V0.2.1 选区与 VWAP 操作演示](docs/price-context-demo.webm) · [计算规则与数据覆盖说明](docs/PRICE_CONTEXT.md)
 
 ## 快速开始
 
@@ -45,6 +47,10 @@ dotnet run --project src/BtcLens.Web
 6. **统计**：净盈亏、成本覆盖、胜率、平均净 R、累计交易盈亏和复盘标签。
 7. **导入与导出**：CSV 预览和事务导入；重复记录检查；提醒与当前分析 JSON 导出。
 8. **订单流**：现货和永续主动买卖 CVD 分开显示，单位统一为 BTC；OI 同时保留张数、BTC、USD。支持 1m/5m/15m 采样显示、采集段历史与最近 500 条聚合成交的 JSON 导出。
+9. **成交量分布**：图上两点选择时间范围，基于固定 5m 数据近似计算 VAH / POC / VAL，保存原始证据并可加入关注区。
+10. **VWAP**：当前日/周/月的已收盘 5m HLC3 加权近似，支持 UTC / UTC+8 重置；历史分页、覆盖状态、缺口与图层开关。
+
+![成交量选区与 VWAP：合成演示](docs/screenshots/price-context.png)
 
 ![现货与永续订单流：合成演示](docs/screenshots/order-flow.png)
 
@@ -123,6 +129,8 @@ CSV 使用 [示例模板](examples/trades.csv)，列名和顺序固定，时间�
 
 V0.2 增加采集段、原始聚合成交、CVD 点、OI 样本四张表，成交与汇总每秒在同一事务保存。显示仅使用已提交的数据；非正常断电可能丢失尚未提交的一秒数据，恢复时重新分段。
 
+V0.2.1 增加冻结成交量选区表，并在独立缓存中保存 5m 历史。加载进度与覆盖不足可见，历史请求失败时保留已有数据。详见 [计算规则](docs/PRICE_CONTEXT.md)。
+
 [架构与数据模型](docs/ARCHITECTURE.md) · [三分钟演示提纲](docs/DEMO.md) · [后续迭代](docs/ROADMAP.md)
 
 ## 验证
@@ -162,7 +170,7 @@ Windows 安装了 Edge 时可以使用 BROWSER_CHANNEL=msedge。浏览器脚本�
 
 当前「观察报告」是确定性的规则报告，可导出结构化 JSON 给你使用的智能体。报告列出数据来源、事实、缺失证据和后续观察事项。
 
-现货/合约 CVD 与 OI 已接入；报告引用采集段、起点、单位及数据时间，过期或演示数据列为缺失证据。固定范围成交量分布、VWAP、个人 Sweep/SFP/MSB 规则和智能体 API 接入继续迭代。课程与历史规则中的未定条件保持未定；当前不产生自动入场授权。
+现货/合约 CVD、OI、固定范围成交量分布与日/周/月 VWAP 已接入；报告引用来源、单位、覆盖范围和数据时间。个人 Sweep/SFP/MSB 规则与智能体 API 为下一阶段；课程与历史规则中的未定条件保持未定，当前不产生自动入场授权。
 
 ## 来源和许可证
 
