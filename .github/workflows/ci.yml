@@ -26,6 +26,8 @@ jobs:
         env:
           BROWSER_CHANNEL: chromium
           BTC_LENS_URL: http://127.0.0.1:5081
+          ASPNETCORE_ENVIRONMENT: Testing
+          OfflineFixture: 'true'
         run: |
           $env:DatabasePath = Join-Path $env:RUNNER_TEMP 'btclens-browser.db'
           Push-Location src/BtcLens.Web
@@ -47,3 +49,4 @@ jobs:
           path: |
             test-results/screenshots/
             test-results/price-context/
+            test-results/chart-workspace/

@@ -30,11 +30,5 @@ const fs = require('node:fs/promises');
     }
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({verified:true,checks:['saved live mode resumes after process restart','old raw messages survive restart','old segments are closed','new segments have separate zero anchors'],oldIds,newIds:state.orderFlow.instruments.map(s=>s.id),consoleErrors:errors},null,2));
-    // Capture the documentation screenshot using explicitly synthetic data.
-    await page.getByRole('button',{name:'演示',exact:true}).click();
-    await page.waitForTimeout(500);
-    await page.getByRole('button',{name:'新回放',exact:true}).click();
-    await page.waitForTimeout(4500);
-    await page.locator('[data-testid="order-flow"]').screenshot({path:'docs/screenshots/order-flow.png'});
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

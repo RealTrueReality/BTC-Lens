@@ -7,7 +7,7 @@ public interface ILensStore
     string? GetSetting(string key);
     void SetSetting(string key, string value);
     WatchZone[] Watches(string scope, bool includeDeleted = false);
-    void SaveWatch(WatchZone zone);
+    void SaveWatch(WatchZone zone, int? promotedDrawingRevision = null);
     bool DeleteWatch(string scope, string id, int expectedRevision, DateTimeOffset deletedAt);
     AlertEvent[] Alerts(string scope);
     AlertEvent? FindAlert(string id);
@@ -20,6 +20,10 @@ public interface ILensStore
     Candle[] ReadCandles(string scope);
     SavedProfile[] Profiles(string scope);
     void SaveProfile(SavedProfile profile);
+    bool SetProfileState(string scope, string id, bool visible, long? deletedAt);
+    ChartDrawing[] Drawings(string scope);
+    void SaveDrawing(ChartDrawing drawing, int? expectedRevision);
+    bool DeleteDrawing(string scope, string id, int expectedRevision, long deletedAt);
     FlowSegment[] FlowSegments(int limit = 40);
     CvdPoint[] CvdPoints(long since, int limit = 3000);
     OpenInterestSample[] OpenInterest(long since, int limit = 3000);

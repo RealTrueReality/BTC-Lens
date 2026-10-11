@@ -11,7 +11,8 @@ public sealed class MarketEngine
     private readonly TimeProvider clock;
     private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
     private readonly SemaphoreSlim gate = new(1, 1);
-    private readonly Candle[] fixture = DemoMarket.Generate();
+    private readonly Candle[] fixture;
+    private readonly bool useFixture;
     private MarketView view = MarketView.Empty;
     private readonly Dictionary<string, PriceSample> samples = new();
     private Candle[] contextCache = [];
@@ -19,12 +20,14 @@ public sealed class MarketEngine
     public MarketView View { get { var state = Volatile.Read(ref view); return state.Mode == "live" ? state with { Flow = orderFlow?.View ?? FlowView.Empty, Cutoff = Now } : state; } }
     public event Action? Changed;
 
-    public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null, TimeProvider? timeProvider = null)
+    public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null, TimeProvider? timeProvider = null, bool useFixture = false)
     {
         this.store = store; this.okx = okx; this.orderFlow = orderFlow; clock = timeProvider ?? TimeProvider.System;
+        this.useFixture = useFixture; fixture = useFixture ? DemoMarket.Generate() : [];
         var earliest = clock.GetUtcNow().AddDays(-40).ToUnixTimeMilliseconds();
         contextCache = store.ReadCandles("live:analysis").Where(c => c.OpenTime >= earliest).ToArray();
         if (orderFlow is not null) orderFlow.Changed += Notify;
+        if (!useFixture) { view = Enrich(LiveEmpty() with { ContextCandles = contextCache }); store.SetSetting("market-mode", "live"); return; }
         var session = store.GetSetting("demo-session") ?? Guid.NewGuid().ToString("N")[..10];
         store.SetSetting("demo-session", session);
         var index = int.TryParse(store.GetSetting("demo-index"), out var saved) ? Math.Clamp(saved, DemoMarket.InitialIndex, fixture.Length) : DemoMarket.InitialIndex;
@@ -57,6 +60,7 @@ public sealed class MarketEngine
     public async Task SwitchModeAsync(string mode)
     {
         if (mode is not ("live" or "demo")) throw new ArgumentException("Invalid mode.");
+        if (mode == "demo" && !useFixture) throw new InvalidOperationException("应用仅提供实时行情。");
         await gate.WaitAsync();
         try
         {
@@ -72,6 +76,7 @@ public sealed class MarketEngine
     }
     public async Task StepAsync(int count = 1)
     {
+        if (!useFixture) throw new InvalidOperationException("回放仅用于离线测试。");
         if (count is < 1 or > 10) throw new ArgumentException("每次回放 1–10 根。");
         await gate.WaitAsync();
         try
@@ -89,6 +94,7 @@ public sealed class MarketEngine
     }
     public async Task NewReplayAsync()
     {
+        if (!useFixture) throw new InvalidOperationException("回放仅用于离线测试。");
         await gate.WaitAsync();
         try
         {
@@ -231,19 +237,20 @@ public sealed class MarketEngine
         finally { gate.Release(); }
         Notify();
     }
-    public async Task<WatchZone> SaveWatchAsync(string? id, int? expectedRevision, WatchVersion draft)
+    public async Task<WatchZone> SaveWatchAsync(string? id, int? expectedRevision, WatchVersion draft, string? expectedScope = null)
     {
         WatchRules.Validate(draft);
         await gate.WaitAsync();
         WatchZone updated;
         try
         {
+            if (expectedScope is not null && expectedScope != view.Scope) throw new ArgumentException("工作区已变化，请重新建立关注区。");
             var old = id is null ? null : store.Watches(view.Scope).FirstOrDefault(w => w.Id == id);
             if (id is not null && (old is null || old.Current.Revision != expectedRevision)) throw new ArgumentException("关注区已变化，请重新打开编辑。");
             var current = draft with { Revision = (old?.Current.Revision ?? 0) + 1, CreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(view.Cutoff) };
             updated = new(old?.Id ?? Guid.NewGuid().ToString("N"), view.Scope, true, false, current,
                 old is null ? [] : [.. old.History, old.Current], view.Quote);
-            store.SaveWatch(updated);
+            store.SaveWatch(updated, old is null ? current.ChartAnchor?.DrawingRevision : null);
             if (view.Quote is not null) samples[updated.Id + ":" + updated.Current.Revision] = view.Quote;
         }
         finally { gate.Release(); }
@@ -270,6 +277,49 @@ public sealed class MarketEngine
             if (!store.DeleteWatch(view.Scope, id, expectedRevision, DateTimeOffset.FromUnixTimeMilliseconds(view.Cutoff)))
                 throw new ArgumentException("关注区已变化或已删除，请刷新后重试。");
             foreach (var key in samples.Keys.Where(key => key.StartsWith(id + ":", StringComparison.Ordinal)).ToArray()) samples.Remove(key);
+        }
+        finally { gate.Release(); }
+        Notify();
+    }
+    public async Task<ChartDrawing> SaveDrawingAsync(DrawingChange change)
+    {
+        if (!Enum.TryParse<DrawingKind>(change.Kind, out var kind)) throw new ArgumentException("绘图类型无效。");
+        await gate.WaitAsync();
+        ChartDrawing drawing;
+        try
+        {
+            if (change.Scope != view.Scope) throw new ArgumentException("工作区已变化，请重新绘图。");
+            var old = change.Id is null ? null : store.Drawings(view.Scope).FirstOrDefault(d => d.Id == change.Id);
+            if (change.Id is not null && (old is null || old.Revision != change.Revision)) throw new ArgumentException("绘图已变化或已删除，请重新选择。");
+            var name = old?.Name ?? kind switch { DrawingKind.Rectangle => "矩形区域", DrawingKind.HorizontalLine => "水平线", _ => "趋势线" };
+            drawing = new(old?.Id ?? Guid.NewGuid().ToString("N"), view.Scope, (old?.Revision ?? 0) + 1, name, kind,
+                change.Start, change.End, change.Price1, change.Price2, old?.CreatedAt ?? View.Cutoff);
+            store.SaveDrawing(drawing, old?.Revision);
+        }
+        finally { gate.Release(); }
+        Notify(); return drawing;
+    }
+    public async Task DeleteDrawingAsync(string id, int revision, string expectedScope)
+    {
+        await gate.WaitAsync();
+        try
+        {
+            if (view.Scope != expectedScope || !store.DeleteDrawing(view.Scope, id, revision, View.Cutoff))
+                throw new ArgumentException("绘图已变化或已删除，请刷新后重试。");
+        }
+        finally { gate.Release(); }
+        Notify();
+    }
+    public Task SetProfileVisibilityAsync(string id, bool visible, string expectedScope) => UpdateProfileAsync(id, visible, false, expectedScope);
+    public Task DeleteProfileAsync(string id, string expectedScope) => UpdateProfileAsync(id, false, true, expectedScope);
+    private async Task UpdateProfileAsync(string id, bool visible, bool delete, string expectedScope)
+    {
+        await gate.WaitAsync();
+        try
+        {
+            if (view.Scope != expectedScope || !store.SetProfileState(view.Scope, id, visible, delete ? View.Cutoff : null))
+                throw new ArgumentException("成交量选区已变化或已删除，请刷新后重试。");
+            view = Enrich(view with { Cutoff = View.Cutoff });
         }
         finally { gate.Release(); }
         Notify();

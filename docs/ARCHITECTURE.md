@@ -3,7 +3,7 @@
 ~~~mermaid
 flowchart LR
     A[OKX REST / WebSocket] --> B[MarketEngine]
-    D[确定性 OHLCV 前缀回放] --> B
+    D[仅测试主机 / 确定性数据] -.-> B
     B --> C[指标与关注规则]
     C --> S[SqlSugar / SQLite]
     B --> W[Blazor / 图表]
@@ -18,11 +18,15 @@ flowchart LR
 
 ## 运行方式
 
-单进程、单用户。BackgroundService 管理行情订阅、重试与 REST 兜底；MarketEngine 串行处理模式、观察样本和关注区变更。页面通过事件订阅刷新，各页面和图表在销毁时取消订阅与释放 JavaScript 对象。
+单进程、单用户。生产实例始终从 live scope 启动，不播种示例交易和关注区；旧示例数据保留在旧 scope。BackgroundService 管理行情订阅、重试与 REST 兜底；MarketEngine 串行处理行情、绘图、关注区与成交量选区变更。页面通过事件订阅刷新，各页面和图表在销毁时取消订阅与释放 JavaScript 对象。
 
 行情样本处理使用内存中的上次观测，避免每个 WebSocket 样本都写数据库。关注区变更、首次触发、交易与回放进度才需要持久化。触发事件与关注区的 Triggered 状态在同一数据库事务提交。
 
 SQLite 连接禁用连接池，并自动关闭连接，保证本地文件可以在应用退出后释放。JSON 中使用 decimal 保留精确输入，JavaScript 的数值只负责图表显示。
+
+`chart_drawings` 保存绘图类型、时间与价格端点、版本和删除标记。拖动保存校验 scope 与预期版本；矩形/水平线转关注时，在同一事务写入关注区并删除源绘图，保留 `ChartAnchor` 来源版本和端点。成交量选区继续冻结计算证据，只允许单独修改 Visible / DeletedAt；删除不清除历史事件或交易引用。
+
+确定性回放仅用于显式 Testing + OfflineFixture 主机；测试端点不在生产环境注册，界面没有模式切换。
 
 订单流后台任务与价格任务分别订阅公共 WebSocket。OrderFlowEngine 校验主动成交、换算 BTC 数量，按成交 ID 去重。原始消息、分钟聚合与段检查点每秒在一个事务提交，再发布给页面；OI 每 10 秒采样。网络中断、模式暂停、进程停止或校验失败时结束段，恢复时另起零基线。异常退出留下的开放段在启动时关闭，不跨越停机时间续算。
 

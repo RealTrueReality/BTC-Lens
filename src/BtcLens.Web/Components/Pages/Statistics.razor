@@ -3,7 +3,7 @@
 @inject MarketEngine Market
 @inject ILensStore Store
 <PageTitle>复盘统计 · BTC Lens</PageTitle>
-<div class="page-heading"><div><div class="eyebrow">LEARN FROM YOUR OWN EXECUTION</div><h1>复盘统计<span class="title-dot">.</span></h1><p>从记录中看执行，让下一次判断更清楚。</p></div><span class="pill @(mode == "demo" ? "amber" : "green")">@(mode == "demo" ? "演示数据" : "个人交易")</span></div>
+<div class="page-heading"><div><div class="eyebrow">LEARN FROM YOUR OWN EXECUTION</div><h1>复盘统计<span class="title-dot">.</span></h1><p>从记录中看执行，让下一次判断更清楚。</p></div><span class="pill green">个人交易</span></div>
 <div class="context-strip"><span>统计覆盖：@stats.Closed 笔已平仓交易，其中 @stats.CostComplete 笔成本齐全。</span><span class="push-right">@(mode == "demo" ? "合成示例 · 非真实业绩" : "累计交易盈亏 · 不含账户出入金")</span></div>
 <div class="metric-grid"><div class="metric"><span class="metric-label">累计已实现净盈亏</span><div class="metric-number mono @(stats.NetPnl > 0 ? "positive" : stats.NetPnl < 0 ? "negative" : "")">@LensFormat.Money(stats.NetPnl)<small>USDT</small></div><span class="metric-foot">仅统计成本齐全的已平仓交易</span></div><div class="metric"><span class="metric-label">胜率</span><div class="metric-number mono">@(stats.WinRate?.ToString("P1") ?? "—")</div><span class="metric-foot">@stats.Wins 盈利 / @stats.Losses 亏损 / @stats.Breakeven 持平</span></div><div class="metric"><span class="metric-label">平均净 R</span><div class="metric-number mono">@(stats.AverageR?.ToString("0.00") ?? "—")<small>R</small></div><span class="metric-foot">需同时具有成本和初始止损</span></div><div class="metric"><span class="metric-label">复盘完成</span><div class="metric-number mono">@trades.Count(t => t.Closed && !string.IsNullOrWhiteSpace(t.Review))<small>/ @stats.Closed 笔</small></div><span class="metric-foot">给每次平仓留下一条发现</span></div></div>
 <div class="stats-grid"><section class="panel"><div class="panel-heading"><h2>累计交易盈亏</h2><span class="subtle-label">按平仓顺序 · USDT</span></div>
@@ -15,7 +15,7 @@ else { <div class="empty-state"><span>▥</span><b>等待可计算的已平仓�
 </section><section class="panel"><div class="panel-heading"><h2>复盘标签</h2><span class="subtle-label">交易笔数</span></div><div class="tag-stat-list">@foreach (var item in Tags) { <div><span>@item.Key</span><b class="mono">@item.Value</b><div class="tag-bar"><i style="@("width:" + (100 * item.Value / Math.Max(1, trades.Length)) + "%")"></i></div></div> }@if (!Tags.Any()) { <p class="muted">为交易添加标签，观察反复出现的执行习惯。</p> }</div></section></div>
 <section class="panel"><div class="panel-heading"><h2>计算口径</h2><span class="subtle-label">BTC-USDT-SWAP · 线性合约</span></div><div class="formula-grid"><div><span class="eyebrow">REALIZED PNL</span><h3>净盈亏</h3><p>方向 ×（平仓价 − 开仓价）× BTC 数量<br />− 手续费 ＋ 有符号资金费</p><small>资金费收入为正、支出为负。未知成本留空。</small></div><div><span class="eyebrow">INITIAL RISK</span><h3>净 R 倍数</h3><p>净盈亏 ÷ 初始风险金额<br />初始风险 = |开仓价 − 初始止损| × BTC 数量</p><small>初始风险保存后固定；杠杆不额外乘入盈亏公式。</small></div></div></section>
 @code {
-    private string mode = "demo";
+    private string mode = "live";
     private Trade[] trades = [], complete = [];
     private JournalStats stats = TradeMath.Summarize([]);
     private decimal[] cumulative = [0];

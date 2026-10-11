@@ -8,7 +8,6 @@ const assert = require('node:assert/strict');
   try {
     await page.goto(url);
     await page.waitForSelector('.chart-host canvas');
-    await page.getByRole('button',{name:'实时 OKX',exact:true}).click();
     let state;
     for(let i=0;i<50;i++){
       const response=await page.request.get(url+'/healthz'); state=await response.json();
@@ -22,7 +21,6 @@ const assert = require('node:assert/strict');
     await page.screenshot({path:'test-results/okx-live.png',fullPage:true});
     console.log(JSON.stringify({verified:true,...state,consoleErrors:errors},null,2));
   } finally {
-    if(!page.isClosed())await page.getByRole('button',{name:'演示',exact:true}).click().catch(()=>{});
     await browser.close();
   }
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -16,6 +16,8 @@ public sealed class LensStore : ILensStore, IDisposable
         db.CodeFirst.InitTables<SettingRow, WatchRow, AlertRow, TradeRow, CandleRow>();
         db.CodeFirst.InitTables<FlowSegmentRow, CvdRow, CapturedTradeRow, OpenInterestRow>();
         db.CodeFirst.InitTables<ProfileRowEntity>();
+        db.CodeFirst.InitTables<DrawingRowEntity>();
+        db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_drawing_scope ON chart_drawings(Scope,Timestamp)");
         db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_profile_scope ON volume_profiles(Scope,Timestamp)");
         db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_candle_scope ON candle_cache(Scope)");
         db.Ado.ExecuteCommand("CREATE INDEX IF NOT EXISTS ix_watch_scope ON watch_zones(Scope)");
@@ -29,13 +31,26 @@ public sealed class LensStore : ILensStore, IDisposable
     public string? GetSetting(string key) { lock (sync) return db.Queryable<SettingRow>().InSingle(key)?.Value; }
     public void SetSetting(string key, string value) { lock (sync) db.Storageable(new SettingRow { Key = key, Value = value }).ExecuteCommand(); }
     public WatchZone[] Watches(string scope, bool includeDeleted = false) { lock (sync) return db.Queryable<WatchRow>().Where(x => x.Scope == scope).ToList().Select(x => JsonCodec.Read<WatchZone>(x.Json)).Where(x => includeDeleted || x.DeletedAt is null).OrderByDescending(x => x.Current.CreatedAt).ToArray(); }
-    public void SaveWatch(WatchZone zone)
+    public void SaveWatch(WatchZone zone, int? promotedDrawingRevision = null)
     {
         lock (sync)
         {
             if (db.Queryable<WatchRow>().InSingle(zone.Id) is { } row && JsonCodec.Read<WatchZone>(row.Json).DeletedAt is not null)
                 throw new ArgumentException("关注区已删除，请重新建立关注区。");
-            db.Storageable(Watch(zone)).ExecuteCommand();
+            if (promotedDrawingRevision is null) { db.Storageable(Watch(zone)).ExecuteCommand(); return; }
+            var sourceId = zone.Current.ChartAnchor?.DrawingId;
+            var source = sourceId is null ? null : db.Queryable<DrawingRowEntity>().InSingle(sourceId);
+            var drawing = source is null ? null : JsonCodec.Read<ChartDrawing>(source.Json);
+            if (drawing is null || drawing.Scope != zone.Scope || drawing.DeletedAt is not null || drawing.Revision != promotedDrawingRevision)
+                throw new ArgumentException("原绘图已变化或已删除，请重新选择后加入关注。");
+            db.Ado.BeginTran();
+            try
+            {
+                db.Storageable(Watch(zone)).ExecuteCommand();
+                source!.Json = JsonCodec.Write(drawing with { DeletedAt = zone.Current.CreatedAt.ToUnixTimeMilliseconds() });
+                db.Updateable(source).ExecuteCommand(); db.Ado.CommitTran();
+            }
+            catch { db.Ado.RollbackTran(); throw; }
         }
     }
     public bool DeleteWatch(string scope, string id, int expectedRevision, DateTimeOffset deletedAt)
@@ -117,7 +132,7 @@ public sealed class LensStore : ILensStore, IDisposable
     public Candle[] ReadCandles(string scope)
     { lock (sync) return db.Queryable<CandleRow>().Where(x => x.Scope == scope).ToList().Select(x => JsonCodec.Read<Candle>(x.Json)).OrderBy(x => x.OpenTime).ToArray(); }
     public SavedProfile[] Profiles(string scope)
-    { lock (sync) return db.Queryable<ProfileRowEntity>().Where(x => x.Scope == scope).OrderByDescending(x => x.Timestamp).Take(20).ToList().Select(x => JsonCodec.Read<SavedProfile>(x.Json)).ToArray(); }
+    { lock (sync) return db.Queryable<ProfileRowEntity>().Where(x => x.Scope == scope).OrderByDescending(x => x.Timestamp).ToList().Select(x => JsonCodec.Read<SavedProfile>(x.Json)).Where(p => p.DeletedAt is null).ToArray(); }
     public void SaveProfile(SavedProfile profile)
     {
         lock (sync)
@@ -129,6 +144,44 @@ public sealed class LensStore : ILensStore, IDisposable
                 return;
             }
             db.Insertable(new ProfileRowEntity { Id = profile.Id, Scope = profile.Scope, Timestamp = profile.CreatedAt, Json = JsonCodec.Write(profile) }).ExecuteCommand();
+        }
+    }
+    public bool SetProfileState(string scope, string id, bool visible, long? deletedAt)
+    {
+        lock (sync)
+        {
+            var row = db.Queryable<ProfileRowEntity>().InSingle(id);
+            if (row is null || row.Scope != scope) return false;
+            var profile = JsonCodec.Read<SavedProfile>(row.Json);
+            if (profile.DeletedAt is not null) return false;
+            row.Json = JsonCodec.Write(profile with { Visible = visible, DeletedAt = deletedAt });
+            db.Updateable(row).ExecuteCommand(); return true;
+        }
+    }
+    public ChartDrawing[] Drawings(string scope)
+    { lock (sync) return db.Queryable<DrawingRowEntity>().Where(x => x.Scope == scope).OrderByDescending(x => x.Timestamp).ToList().Select(x => JsonCodec.Read<ChartDrawing>(x.Json)).Where(d => d.DeletedAt is null).ToArray(); }
+    public void SaveDrawing(ChartDrawing drawing, int? expectedRevision)
+    {
+        DrawingRules.Validate(drawing);
+        lock (sync)
+        {
+            var row = db.Queryable<DrawingRowEntity>().InSingle(drawing.Id);
+            var old = row is null ? null : JsonCodec.Read<ChartDrawing>(row.Json);
+            if (old is null ? expectedRevision is not null || drawing.Revision != 1
+                : old.DeletedAt is not null || old.Scope != drawing.Scope || old.Revision != expectedRevision || drawing.Revision != old.Revision + 1 || old.Kind != drawing.Kind || old.CreatedAt != drawing.CreatedAt)
+                throw new ArgumentException("绘图已变化或已删除，请重新选择。");
+            db.Storageable(new DrawingRowEntity { Id = drawing.Id, Scope = drawing.Scope, Timestamp = drawing.CreatedAt, Json = JsonCodec.Write(drawing) }).ExecuteCommand();
+        }
+    }
+    public bool DeleteDrawing(string scope, string id, int expectedRevision, long deletedAt)
+    {
+        lock (sync)
+        {
+            var row = db.Queryable<DrawingRowEntity>().InSingle(id);
+            if (row is null || row.Scope != scope) return false;
+            var drawing = JsonCodec.Read<ChartDrawing>(row.Json);
+            if (drawing.DeletedAt is not null || drawing.Revision != expectedRevision) return false;
+            row.Json = JsonCodec.Write(drawing with { DeletedAt = deletedAt }); db.Updateable(row).ExecuteCommand(); return true;
         }
     }
     public FlowSegment[] FlowSegments(int limit = 40)

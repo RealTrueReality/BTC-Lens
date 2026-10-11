@@ -6,7 +6,7 @@ const base=process.env.BTC_LENS_URL||'http://127.0.0.1:5081';
  const page=await browser.newPage({viewport:{width:1440,height:1000},locale:'zh-CN',timezoneId:'Asia/Shanghai',acceptDownloads:true});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));fs.mkdirSync('test-results/price-context',{recursive:true});
  try {
-  await page.goto(base);await page.getByRole('button',{name:'实时 OKX',exact:true}).click();
+  await page.goto(base);
   let state;const started=Date.now();
   while(Date.now()-started<180000){
     state=await (await page.request.get(base+'/healthz')).json();const c=state.priceContext;
@@ -29,5 +29,5 @@ const base=process.env.BTC_LENS_URL||'http://127.0.0.1:5081';
   await page.reload();await page.getByTestId('profile-detail').waitFor();assert.match(await page.getByTestId('profile-detail').innerText(),/选区覆盖完整/);
   assert.deepEqual(errors,[]);fs.writeFileSync('test-results/price-context/live-verification.json',JSON.stringify({passed:4,checks:['cold OKX backfill / all anchors covered','both timezone anchors','actual profile export','refresh persistence'],priceContext:price,utcContext:utc.priceContext,errors},null,2));
   console.log(JSON.stringify({passed:4,candles:price.candles,vwaps:price.vwaps,errors},null,2));
- } finally {await page.getByRole('button',{name:'演示',exact:true}).click().catch(()=>{});await browser.close();}
+ } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

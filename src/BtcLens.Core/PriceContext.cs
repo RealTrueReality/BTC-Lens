@@ -15,7 +15,11 @@ public sealed record ProfileResult(string Algorithm, string Instrument, long Sta
     decimal? Poc, decimal? Vah, decimal? Val, int PocRow, int VaLowRow, int VaHighRow,
     ProfileRow[] Rows, CandleCoverage Coverage, string SourceHash);
 public sealed record SavedProfile(string Id, string Scope, string Name, string DisplayTimeframe,
-    long CreatedAt, ProfileResult Result, Candle[] SourceBars);
+    long CreatedAt, ProfileResult Result, Candle[] SourceBars)
+{
+    public bool Visible { get; init; } = true;
+    public long? DeletedAt { get; init; }
+}
 public sealed record PriceReference(string Kind, string EvidenceId, string Label, decimal Price,
     long KnownAt, string Algorithm, string SourceHash);
 public sealed record VwapPoint(long KnownAt, decimal Value, int Segment);

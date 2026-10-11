@@ -17,7 +17,9 @@ builder.Services.AddRazorComponents()
 builder.Services.AddMudServices();
 builder.Services.AddSingleton<ILensStore>(_ => new LensStore(builder.Configuration["DatabasePath"] ?? Path.Combine(builder.Environment.ContentRootPath, "App_Data", "btclens.db")));
 builder.Services.AddHttpClient<OkxClient>(client => { client.BaseAddress = new Uri(builder.Configuration["Okx:RestUrl"] ?? "https://www.okx.com/"); client.Timeout = TimeSpan.FromSeconds(8); });
-builder.Services.AddSingleton<MarketEngine>();
+var offlineFixture = builder.Environment.IsEnvironment("Testing") && builder.Configuration.GetValue<bool>("OfflineFixture");
+builder.Services.AddSingleton<MarketEngine>(services => new(services.GetRequiredService<ILensStore>(),
+    services.GetRequiredService<OkxClient>(), services.GetRequiredService<OrderFlowEngine>(), useFixture: offlineFixture));
 builder.Services.AddSingleton<OrderFlowEngine>();
 builder.Services.AddHostedService<MarketWorker>();
 builder.Services.AddHostedService<OrderFlowWorker>();
@@ -51,5 +53,12 @@ app.MapGet("/healthz", (MarketEngine market) =>
 app.MapGet("/downloads/trades-template.csv", () => Results.File(System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(TradeCsv.Template)).ToArray(), "text/csv", "btclens-trades-template.csv"));
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// Deterministic browser fixtures are available only in an explicitly isolated test host.
+if (offlineFixture)
+{
+    app.MapPost("/test/replay", async (MarketEngine market) => { await market.SwitchModeAsync("demo"); await market.NewReplayAsync(); return Results.Ok(new { market.View.Scope, market.View.Cutoff }); });
+    app.MapPost("/test/step/{count:int}", async (int count, MarketEngine market) => { await market.StepAsync(count); return Results.Ok(new { market.View.Cutoff }); });
+}
 
 app.Run();

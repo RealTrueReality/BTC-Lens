@@ -21,7 +21,6 @@ const base = process.env.BTC_LENS_URL || 'http://127.0.0.1:5081';
   }
   try {
     await page.goto(base); await page.waitForSelector('.flow-chart canvas');
-    await page.getByRole('button', { name:'实时 OKX', exact:true }).click();
     const first = await ready();
     await page.waitForTimeout(3500);
     const next = await ready();
@@ -54,20 +53,13 @@ const base = process.env.BTC_LENS_URL || 'http://127.0.0.1:5081';
     await page.locator('[data-testid="order-flow"]').screenshot({ path:'test-results/order-flow-live.png' });
     await page.reload(); await page.waitForSelector('.flow-chart canvas');
     assert.deepEqual((await ready()).orderFlow.instruments.map(s => s.id).sort(), before.sort());
-    await page.getByRole('button',{ name:'演示', exact:true }).click(); await page.waitForTimeout(1500);
-    assert.match(await page.locator('[data-testid="order-flow"]').innerText(), /独立合成/);
-    await page.getByRole('button',{ name:'实时 OKX', exact:true }).click();
     const resumed = await ready();
-    assert.ok(resumed.orderFlow.instruments.every(s => !before.includes(s.id)));
-    await page.locator('.flow-records summary').click();
-    assert.match(await page.locator('.flow-records').innerText(), /未回补/);
     await page.setViewportSize({width:390,height:844}); await page.waitForTimeout(500);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     assert.deepEqual(errors, []);
     await fs.writeFile('test-results/order-flow-live-state.json', JSON.stringify(resumed, null, 2));
-    console.log(JSON.stringify({ verified:true, checks:['spot/perp actual taker trades','native OI units','freshness','CVD arithmetic','JSON capture export','observation report','refresh persistence','mode gap and new segments','mobile layout'], orderFlow:resumed.orderFlow, consoleErrors:errors }, null, 2));
+    console.log(JSON.stringify({ verified:true, checks:['spot/perp actual taker trades','native OI units','freshness','CVD arithmetic','JSON capture export','observation report','refresh persistence','mobile layout'], orderFlow:resumed.orderFlow, consoleErrors:errors }, null, 2));
   } finally {
-    if (process.env.KEEP_LIVE !== '1') await page.getByRole('button', {name:'演示',exact:true}).click().catch(()=>{});
     await browser.close();
   }
 })().catch(e => { console.error(e); process.exitCode = 1; });

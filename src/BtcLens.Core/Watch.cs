@@ -4,6 +4,7 @@ public sealed record WatchVersion(int Revision, string Name, decimal Lower, deci
     string Timeframe, Bias Bias, string Notes, string? SourceZoneId, DateTimeOffset CreatedAt)
 {
     public PriceReference? PriceReference { get; init; }
+    public ChartAnchor? ChartAnchor { get; init; }
 }
 public sealed record WatchZone(string Id, string Scope, bool Enabled, bool Triggered,
     WatchVersion Current, WatchVersion[] History, PriceSample? LastSample = null)

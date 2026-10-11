@@ -164,7 +164,7 @@ public sealed class OrderFlowTests : IDisposable
     [Fact] public async Task AlertAndJournalContextCanCarryImmutableFlowEvidence()
     {
         using var store = new LensStore(FilePath);
-        var market = new MarketEngine(store, new OkxClient(new HttpClient()), new OrderFlowEngine(store));
+        var market = new MarketEngine(store, new OkxClient(new HttpClient()), new OrderFlowEngine(store), useFixture: true);
         await market.StepAsync(5);
         var evidence = Assert.Single(store.Alerts(market.View.Scope)).EvidenceJson;
         using var json = JsonDocument.Parse(evidence);

@@ -4,19 +4,19 @@
 
 **一个从个人交易习惯出发的 BTC 盯盘与交易复盘工作区。**
 
-BTC Lens combines a BTC market radar, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data or deterministic offline replay.
+BTC Lens combines a BTC market radar, chart drawings, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data.
 
-**当前 V0.2.1**：固定范围成交量分布、VAH / POC / VAL、日/周/月 VWAP 已加入。位置可转为关注区，计算来源与结果随报告、到区事件和交易记录保存。实时 CVD / OI 保持持续采集。
+**当前 V0.2.2**：启动即接入实时行情。点击图上 OB / FVG 加入关注；矩形、水平线、趋势线可绘制、拖动、保存与删除。多个固定范围成交量分布可同时显示、分别隐藏和删除。日/周/月 VWAP 与实时 CVD / OI 持续采集。
 
-![行情雷达](docs/screenshots/radar.png)
+![行情雷达与多个成交量选区：离线测试截图](docs/screenshots/radar.png)
 
-[V0.1 核心闭环演示：约 3 分钟（带字幕，无配音）](docs/demo.webm)
+[历史 V0.1 录屏：约 3 分钟（带字幕，无配音）](docs/demo.webm)
 
-[V0.2.1 选区与 VWAP 操作演示](docs/price-context-demo.webm) · [计算规则与数据覆盖说明](docs/PRICE_CONTEXT.md)
+[历史 V0.2.1 选区与 VWAP 录屏](docs/price-context-demo.webm) · [计算规则与数据覆盖说明](docs/PRICE_CONTEXT.md) · [当前图表操作](docs/CHART_WORKSPACE.md)
 
 ## 快速开始
 
-已在 Windows / .NET SDK 10.0.401 上验证。首次启动需要联网还原 NuGet 包；启动后的离线演示无需行情网络、账户密钥或大模型 API。
+已在 Windows / .NET SDK 10.0.401 上验证。首次启动需要联网还原 NuGet 包；实时行情需要网络，无需账户密钥或大模型 API。
 
 在仓库根目录运行：
 
@@ -25,7 +25,7 @@ dotnet restore
 dotnet run --project src/BtcLens.Web
 ~~~
 
-打开 **http://127.0.0.1:5080**。默认使用明确标注的合成行情回放。
+打开 **http://127.0.0.1:5080**。自动连接 OKX 实时公共行情，不再提供演示模式入口。
 
 也可以运行：
 
@@ -33,24 +33,24 @@ dotnet run --project src/BtcLens.Web
 .\tools\Start-BtcLens.ps1
 ~~~
 
-点击「实时 OKX」接入 BTC-USDT-SWAP 公共行情。WebSocket 不可用时，程序尝试 REST 轮询，并显示来源。公共行情失败时，保留上次数据与时间。
+自动接入 BTC-USDT-SWAP 公共行情。WebSocket 不可用时，程序尝试 REST 轮询，并显示来源。公共行情失败时，保留上次数据与时间。
 
 订单流使用独立的公共 `trades` WebSocket，同时订阅 BTC-USDT 与 BTC-USDT-SWAP；OI 每 10 秒通过 REST 采样。价格的 REST 兜底不替代缺失成交。首次接入后从收到的首笔成交起累计，曲线需要时间积累。
 
 ## 已实现的闭环
 
 1. **观察行情**：1D、4H、1H、30m、15m、5m 图表；已确认的基础 FVG、参考 OB；前日/前周高低及当日开盘。
-2. **选择关注区**：从自动区域加入关注、图上两点选区、编辑、暂停或删除。大周期关注区可在低周期图中显示。
+2. **图上操作**：点击 OB / FVG 加入关注，矩形可转为关注区；矩形、水平线和趋势线支持拖动、持久化和删除。关注区可以定位、编辑、暂停或删除。
 3. **持续监控**：首次观测进入区域时，保存价格、版本和当时证据。同一版本去重，重启后保留。
 4. **记录交易**：多空、实际成交价、BTC 数量、初始止损、目标、手续费、资金费、PNG/JPEG 截图。
 5. **复盘**：开仓理由、复盘文字、标签、提醒关联与记录时行情快照。
 6. **统计**：净盈亏、成本覆盖、胜率、平均净 R、累计交易盈亏和复盘标签。
 7. **导入与导出**：CSV 预览和事务导入；重复记录检查；提醒与当前分析 JSON 导出。
 8. **订单流**：现货和永续主动买卖 CVD 分开显示，单位统一为 BTC；OI 同时保留张数、BTC、USD。支持 1m/5m/15m 采样显示、采集段历史与最近 500 条聚合成交的 JSON 导出。
-9. **成交量分布**：图上两点选择时间范围，基于固定 5m 数据近似计算 VAH / POC / VAL，保存原始证据并可加入关注区。
+9. **成交量分布**：图上选择多个独立时间范围，同时显示分布与 VAH / POC / VAL；分别定位、隐藏和删除。基于固定 5m 数据近似计算，保存原始证据并可从位置加入关注。
 10. **VWAP**：当前日/周/月的已收盘 5m HLC3 加权近似，支持 UTC / UTC+8 重置；历史分页、覆盖状态、缺口与图层开关。
 
-![成交量选区与 VWAP：合成演示](docs/screenshots/price-context.png)
+![历史 V0.2.1 成交量选区与 VWAP：合成演示](docs/screenshots/price-context.png)
 
 ![现货与永续订单流：合成演示](docs/screenshots/order-flow.png)
 
@@ -59,14 +59,15 @@ dotnet run --project src/BtcLens.Web
 
 ## 五分钟体验
 
-- 保持「演示」模式，点击「新回放」。
-- 查看 FVG/OB 候选，或建立自己的关注区。
-- 点击「推进 5 根」：默认示例关注区产生一次到区事件。
-- 再次推进或刷新，已有事件不重复新增。
+- 等待实时 K 线和历史参考载入。
+- 点击图上 FVG / OB 的区域或标签，再点击「加入关注」。
+- 选择「矩形」，点击两个角点，随后把这个价格范围加入关注。
+- 选择「成交量选区」，点击区间起点和终点，预览、保存；可重复保存多个选区。
+- 区外到区内的新观测生成到区记录；同一版本不重复新增。
 - 点击事件，查看快照并进入「关联交易记录」。
 - 保存交易、补齐成本和复盘，再查看统计。
 
-回放是合成 OHLCV，按 5m 收盘价推进，不能重建收盘之间的逐笔价格路径。示例交易与个人记录分开保存，演示统计不代表真实业绩。
+旧版合成示例留在原有数据库范围中，不混入实时个人记录。离线数据仅用于显式隔离的测试实例，正式页面没有回放切换或回放 API。
 
 ## 指标和时间约定
 
@@ -142,11 +143,13 @@ dotnet build BtcLens.slnx -c Release
 dotnet test BtcLens.slnx -c Release --no-build
 ~~~
 
-或运行 tools/Verify.ps1。浏览器检查使用独立演示数据库：
+或运行 tools/Verify.ps1。浏览器检查使用明确隔离的测试实例与合成数据，不访问真实交易账户：
 
 ~~~powershell
 # 终端 1：独立测试实例
 $env:DatabasePath = Join-Path $PWD 'test-results/browser.db'
+$env:ASPNETCORE_ENVIRONMENT = 'Testing'
+$env:OfflineFixture = 'true'
 dotnet run --project src/BtcLens.Web --no-launch-profile --urls http://127.0.0.1:5081
 
 # 终端 2：可选浏览器开发依赖
@@ -156,9 +159,9 @@ $env:BROWSER_CHANNEL = 'chromium'
 pnpm test:browser
 ~~~
 
-Windows 安装了 Edge 时可以使用 BROWSER_CHANNEL=msedge。浏览器脚本会修改该测试实例的演示工作区，验证提醒、交易、截图、CSV、版本、图表选区和移动布局。
+Windows 安装了 Edge 时可以使用 BROWSER_CHANNEL=msedge。浏览器脚本会修改这个独立测试实例，验证图内关注、矩形拖动、多个选区、删除持久化、提醒、交易、CSV、VWAP 和移动布局。测试 API 仅在 Testing 环境且显式开启 OfflineFixture 时注册，正式实例没有这些路由。
 
-另可运行 `node tools/check-order-flow.cjs` 验证真实公共订单流、OI、导出和模式切换分段。该检查需要可访问 OKX 的网络，默认不纳入离线 CI。`KEEP_LIVE=1` 可让检查结束后继续采集。
+另可运行 `node tools/check-order-flow.cjs` 验证真实公共订单流、OI、导出和刷新持久化。该检查需要访问 OKX 的网络，不纳入离线 CI；完成后行情继续采集。
 
 ## 本地数据与配置
 

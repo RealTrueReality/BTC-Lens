@@ -14,7 +14,12 @@
     <div class="profile-heading"><div><h3>固定范围成交量分布</h3><p>圈选盘整区间，保存 VAH / POC / VAL。使用 5m K 线高低区间均匀分配近似。</p></div><div class="button-group"><button class="button small" @onclick="() => DrawRange.InvokeAsync()">图上选择时间范围</button><button class="button small primary" @onclick="NewRange">填写时间范围</button></div></div>
     @if (View.PriceContext.Profiles.Length > 0)
     {
-        <label class="profile-selector">已保存选区<select aria-label="已保存成交量选区" value="@SelectedId" @onchange="SelectProfile">@foreach (var p in View.PriceContext.Profiles) { <option value="@p.Id">@p.Name · @LensFormat.Time(p.Result.Start) — @LensFormat.Time(p.Result.End)</option> }</select></label>
+        <div class="profile-list" aria-label="已保存成交量选区">
+            @foreach (var p in View.PriceContext.Profiles)
+            {
+                <div class="profile-item @(SelectedId == p.Id ? "selected" : "")" data-profile-id="@p.Id" @key="p.Id"><div><button class="text-button" @onclick="() => SelectedChanged.InvokeAsync(p.Id)">@p.Name</button><small>@LensFormat.Time(p.Result.Start) — @LensFormat.Time(p.Result.End)</small></div><div class="button-group"><label><input type="checkbox" checked="@p.Visible" aria-label="@("显示选区 " + p.Name)" @onchange="e => ToggleVisible(p, e)" />显示</label><button class="text-button" @onclick="() => LocateRequested.InvokeAsync(p.Id)">定位</button><button class="text-button danger" @onclick="() => Delete(p)">删除</button></div></div>
+            }
+        </div>
     }
     @if (Selected is { } selected)
     {
@@ -30,7 +35,7 @@
 @if (form is not null)
 {
     <div class="modal-backdrop"><section class="modal wide" role="dialog" aria-modal="true" aria-label="成交量选区编辑"><div class="modal-heading"><div><span class="eyebrow">FIXED RANGE · 5M APPROXIMATION</span><h2>保存成交量选区</h2></div><button class="icon-button" aria-label="关闭成交量选区" @onclick="Close">×</button></div>
-        <form @onsubmit="Save" @onsubmit:preventDefault><label>选区名称<input required maxlength="100" @bind="form.Name" /></label><div class="form-grid"><label>开始时间（北京时间，包含）<input type="datetime-local" required step="300" @bind="form.Start" /></label><label>结束时间（北京时间，不含）<input type="datetime-local" required step="300" @bind="form.End" /></label><label>成交量分布行数<input type="number" min="8" max="120" required @bind="form.Rows" /></label><label>价值区比例（%）<input type="number" min="1" max="100" required @bind="form.Area" /></label></div><p class="form-note">当前可用 5m 覆盖：@(View.ContextCandles.Length == 0 ? "等待数据" : LensFormat.Time(View.ContextCandles[0].OpenTime) + " 至 " + LensFormat.Time(View.ContextCandles[^1].CloseTime))。只计算截至当前回放时点的已收盘 K 线；缺失部分会单独标记。</p>
+        <form @onsubmit="Save" @onsubmit:preventDefault><label>选区名称<input required maxlength="100" @bind="form.Name" /></label><div class="form-grid"><label>开始时间（北京时间，包含）<input type="datetime-local" required step="300" @bind="form.Start" /></label><label>结束时间（北京时间，不含）<input type="datetime-local" required step="300" @bind="form.End" /></label><label>成交量分布行数<input type="number" min="8" max="120" required @bind="form.Rows" /></label><label>价值区比例（%）<input type="number" min="1" max="100" required @bind="form.Area" /></label></div><p class="form-note">当前可用 5m 覆盖：@(View.ContextCandles.Length == 0 ? "等待数据" : LensFormat.Time(View.ContextCandles[0].OpenTime) + " 至 " + LensFormat.Time(View.ContextCandles[^1].CloseTime))。只计算当前已收盘 K 线；缺失部分会单独标记。</p>
         @if (preview is not null) { <div class="profile-preview" data-testid="profile-preview">POC <b>@LensFormat.Price(preview.Poc)</b> · VAH <b>@LensFormat.Price(preview.Vah)</b> · VAL <b>@LensFormat.Price(preview.Val)</b><p>覆盖 @preview.Coverage.Observed / @preview.Coverage.Expected 根，缺失 @preview.Coverage.Missing 根；@preview.TotalBtc.ToString("0.########") BTC。@(preview.Coverage.Complete ? "选区覆盖完整。" : "数据不完整，保存结果仅代表已覆盖部分。")</p></div> }
         @if (error is not null) { <p class="inline-error">@error</p> }
         <div class="modal-actions"><button type="button" class="button" @onclick="Preview">预览计算</button><button type="submit" class="button primary">保存选区</button></div></form></section></div>
@@ -39,6 +44,7 @@
     [Parameter] public MarketView View { get; set; } = MarketView.Empty;
     [Parameter] public string? SelectedId { get; set; }
     [Parameter] public EventCallback<string> SelectedChanged { get; set; }
+    [Parameter] public EventCallback<string> LocateRequested { get; set; }
     [Parameter] public EventCallback DrawRange { get; set; }
     [Parameter] public EventCallback<(PriceReference Reference, string Timeframe)> LevelPicked { get; set; }
     [Parameter] public string Timeframe { get; set; } = "5m";
@@ -50,7 +56,16 @@
     protected override void OnParametersSet() { if (previousScope != View.Scope) { previousScope = View.Scope; Close(); } }
     private bool Usable(VwapResult v) => v.Value is not null && v.Coverage.Complete && v.KnownAt <= View.Cutoff && View.Cutoff - v.KnownAt < 600_000 && v.Anchor == PriceContextRules.Anchor(View.Cutoff, v.Period, v.OffsetHours);
     private async Task ChangeOffset(ChangeEventArgs e) => await Market.SetVwapOffsetAsync(int.Parse(e.Value!.ToString()!));
-    private Task SelectProfile(ChangeEventArgs e) => SelectedChanged.InvokeAsync(e.Value!.ToString()!);
+    private async Task ToggleVisible(SavedProfile profile, ChangeEventArgs e)
+    {
+        try { await Market.SetProfileVisibilityAsync(profile.Id, e.Value is true, View.Scope); }
+        catch (ArgumentException ex) { Snack.Add(ex.Message, Severity.Warning); }
+    }
+    private async Task Delete(SavedProfile profile)
+    {
+        try { await Market.DeleteProfileAsync(profile.Id, View.Scope); Snack.Add("成交量选区已删除。", Severity.Success); }
+        catch (ArgumentException ex) { Snack.Add(ex.Message, Severity.Warning); }
+    }
     private void NewRange()
     {
         var end = Math.Min(View.ContextCandles.LastOrDefault()?.CloseTime ?? View.Cutoff, View.Cutoff / PriceContextRules.Step * PriceContextRules.Step);

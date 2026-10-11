@@ -98,7 +98,7 @@ public sealed class PriceContextTests : IDisposable
         var path = Path.Combine(directory, "test.db"); string profileId, evidence, scope;
         using (var store = new LensStore(path))
         {
-            var market = new MarketEngine(store, new OkxClient(new HttpClient())); var state = market.View; scope = state.Scope;
+            var market = new MarketEngine(store, new OkxClient(new HttpClient()), useFixture: true); var state = market.View; scope = state.Scope;
             var p = await market.SaveProfileAsync("range", "4H", state.Cutoff - 6 * 3_600_000, state.Cutoff, 40, 70, scope); profileId = p.Id;
             Assert.Equal(p.Result.SourceHash, PriceContextRules.Hash(p.SourceBars));
             var w = Assert.Single(store.Watches(scope));

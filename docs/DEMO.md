@@ -1,6 +1,6 @@
 # 三分钟核心闭环演示提纲
 
-`demo.webm` 对应 V0.1 核心闭环；`price-context-demo.webm` 展示 V0.2.1 的 VWAP、图上时间选区、成交量分布、加入关注和观察报告，使用合成行情。可运行 `node tools/record-price-context.cjs` 在独立测试实例重新录制。
+`demo.webm` 对应 V0.1 核心闭环；`price-context-demo.webm` 展示 V0.2.1 的 VWAP、图上时间选区、成交量分布、加入关注和观察报告，使用合成行情。这些录屏保留旧版本的合成流程；V0.2.2 已取消演示入口，当前操作见 [图表工作区](CHART_WORKSPACE.md)。旧录制脚本需在对应历史版本使用。
 
 ## 0:00–0:30：真实使用动机
 

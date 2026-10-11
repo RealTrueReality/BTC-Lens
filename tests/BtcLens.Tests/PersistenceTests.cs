@@ -31,7 +31,7 @@ public sealed class PersistenceTests : IDisposable
     }
     [Fact] public async Task DemoEndToEndTouchesOnceKeepsSnapshotAndIsolatesNewSession()
     {
-        using var s=new LensStore(FilePath); var engine=new MarketEngine(s,new OkxClient(new HttpClient()));
+        using var s=new LensStore(FilePath); var engine=new MarketEngine(s,new OkxClient(new HttpClient()), useFixture: true);
         var oldScope=engine.View.Scope; var original=Assert.Single(s.Watches(oldScope));
         await engine.StepAsync(5); var a=Assert.Single(s.Alerts(oldScope)); Assert.Equal(original.Current,a.Zone);
         await engine.StepAsync(5); Assert.Single(s.Alerts(oldScope));
@@ -45,10 +45,10 @@ public sealed class PersistenceTests : IDisposable
         string scope;
         using (var s = new LensStore(FilePath))
         {
-            var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient()), useFixture: true);
             scope = engine.View.Scope; var watch = Assert.Single(s.Watches(scope));
             await engine.SwitchModeAsync("live");
-            engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            engine = new MarketEngine(s, new OkxClient(new HttpClient()), useFixture: true);
             await engine.SwitchModeAsync("demo");
             await engine.DeleteWatchAsync(watch.Id, watch.Current.Revision, scope);
             await engine.StepAsync(10);
@@ -57,7 +57,7 @@ public sealed class PersistenceTests : IDisposable
         }
         using (var s = new LensStore(FilePath))
         {
-            var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient()), useFixture: true);
             Assert.Equal(scope, engine.View.Scope); Assert.Empty(s.Watches(scope));
             await engine.NewReplayAsync(); Assert.Single(s.Watches(engine.View.Scope));
         }
@@ -67,7 +67,7 @@ public sealed class PersistenceTests : IDisposable
         string scope, eventId, eventJson, tradeJson;
         using (var s = new LensStore(FilePath))
         {
-            var engine = new MarketEngine(s, new OkxClient(new HttpClient())); scope = engine.View.Scope;
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient()), useFixture: true); scope = engine.View.Scope;
             var watch = Assert.Single(s.Watches(scope)); await engine.StepAsync(5);
             var alert = Assert.Single(s.Alerts(scope)); eventId = alert.Id; eventJson = JsonCodec.Write(alert);
             var trade = TradeTests.Example() with { Id = "linked", Mode = "demo", AlertId = eventId, EntrySnapshotJson = alert.EvidenceJson };
@@ -80,7 +80,7 @@ public sealed class PersistenceTests : IDisposable
         }
         using (var s = new LensStore(FilePath))
         {
-            var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+            var engine = new MarketEngine(s, new OkxClient(new HttpClient()), useFixture: true);
             Assert.Empty(s.Watches(scope));
             Assert.Equal(eventJson, JsonCodec.Write(s.FindAlert(eventId)));
             Assert.Equal(tradeJson, JsonCodec.Write(s.FindTrade("linked")));
@@ -88,7 +88,7 @@ public sealed class PersistenceTests : IDisposable
     }
     [Fact] public async Task DeleteRejectsChangedRevisionAndDifferentWorkspace()
     {
-        using var s = new LensStore(FilePath); var engine = new MarketEngine(s, new OkxClient(new HttpClient()));
+        using var s = new LensStore(FilePath); var engine = new MarketEngine(s, new OkxClient(new HttpClient()), useFixture: true);
         var scope = engine.View.Scope; var watch = Assert.Single(s.Watches(scope));
         await engine.SaveWatchAsync(watch.Id, 1, watch.Current with { Notes = "changed in another tab" });
         await Assert.ThrowsAsync<ArgumentException>(() => engine.DeleteWatchAsync(watch.Id, 1, scope));
