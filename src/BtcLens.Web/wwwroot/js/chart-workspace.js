@@ -54,7 +54,13 @@ export function create(host, dotnet) {
     };
     const geometry = obj => {
         const size = plot(), x1 = xAt(obj.start), x2 = obj.extend ? size.width : xAt(obj.end);
-        const y1 = series.priceToCoordinate(obj.price1 ?? obj.upper), y2 = series.priceToCoordinate(obj.price2 ?? obj.lower);
+        let lastPrice = obj.price2 ?? obj.lower;
+        if(obj.drawingKind === 'TrendLine' && obj.extend) {
+            const right = pointAt(size.width, size.height / 2);
+            if(!right || obj.end === obj.start) return null;
+            lastPrice = obj.price1 + (obj.price2 - obj.price1) * (right.time - obj.start) / (obj.end - obj.start);
+        }
+        const y1 = series.priceToCoordinate(obj.price1 ?? obj.upper), y2 = series.priceToCoordinate(lastPrice);
         if ([x1,x2,y1,y2].some(x => x === null)) return null;
         return { x1, x2, y1, y2, left: Math.min(x1,x2), right: Math.max(x1,x2), top: Math.min(y1,y2), bottom: Math.max(y1,y2) };
     };
@@ -112,6 +118,11 @@ export function create(host, dotnet) {
         ctx.strokeStyle = obj.color; ctx.lineWidth = isSelected(obj) ? 2 : 1;
         ctx.setLineDash(obj.kind === 'watch' || obj.kind === 'profile' ? [5,4] : []);
         if (obj.drawingKind === 'HorizontalLine' || obj.drawingKind === 'TrendLine') {
+            if(obj.tolerance) {
+                const offset=Math.abs(series.priceToCoordinate(obj.price1 + obj.tolerance)-g.y1);
+                ctx.fillStyle=obj.color+'18'; ctx.beginPath();ctx.moveTo(g.x1,g.y1-offset);ctx.lineTo(g.x2,g.y2-offset);
+                ctx.lineTo(g.x2,g.y2+offset);ctx.lineTo(g.x1,g.y1+offset);ctx.closePath();ctx.fill();
+            }
             ctx.beginPath(); ctx.moveTo(obj.drawingKind === 'HorizontalLine' ? 0 : g.x1,g.y1); ctx.lineTo(g.x2,g.y2); ctx.stroke();
         } else {
             ctx.fillStyle = obj.color + (isSelected(obj) ? '22' : '12');
@@ -133,7 +144,7 @@ export function create(host, dotnet) {
                 ctx.fillStyle=obj.color; ctx.font='10px Segoe UI, sans-serif'; ctx.fillText(name,Math.max(4,edge-33),y-3); }
         }
         if (isSelected(obj) && editable(obj)) {
-            const handles = obj.drawingKind==='HorizontalLine' ? [[Math.max(12,g.x1),g.y1]] : [[g.x1,g.y1],[g.x2,g.y2]];
+            const handles = obj.drawingKind==='HorizontalLine' ? [[Math.max(12,g.x1),g.y1]] : [[g.x1,g.y1],[obj.drawingKind==='TrendLine'?xAt(obj.end):g.x2,obj.drawingKind==='TrendLine'?series.priceToCoordinate(obj.price2):g.y2]];
             ctx.fillStyle='#13191d'; ctx.strokeStyle=obj.color;
             for (const [x,y] of handles) { ctx.fillRect(x-4,y-4,8,8); ctx.strokeRect(x-4,y-4,8,8); }
         }
@@ -157,9 +168,10 @@ export function create(host, dotnet) {
             if(obj.drawingKind==='HorizontalLine') { if(Math.abs(p.y-g.y1)<=6) return {obj,handle:'move'}; continue; }
             if(isSelected(obj) && editable(obj)) {
                 if(Math.hypot(p.x-g.x1,p.y-g.y1)<=9) return {obj,handle:'first'};
-                if(Math.hypot(p.x-g.x2,p.y-g.y2)<=9) return {obj,handle:'second'};
+                const lastX=obj.drawingKind==='TrendLine'?xAt(obj.end):g.x2,lastY=obj.drawingKind==='TrendLine'?series.priceToCoordinate(obj.price2):g.y2;
+                if(Math.hypot(p.x-lastX,p.y-lastY)<=9) return {obj,handle:'second'};
             }
-            if(obj.drawingKind==='TrendLine') { if(distanceToLine(p,g)<=6) return {obj,handle:'move'}; }
+            if(obj.drawingKind==='TrendLine') { if(distanceToLine(p,g)<=Math.max(6,obj.tolerance?Math.abs(series.priceToCoordinate(obj.price1+obj.tolerance)-g.y1):0)) return {obj,handle:'move'}; }
             else if(p.x>=Math.max(0,g.left)-3 && p.x<=g.right+3 && p.y>=g.top-4 && p.y<=g.bottom+4) return {obj,handle:'move'};
         } return null;
     };
@@ -226,6 +238,13 @@ export function create(host, dotnet) {
     return {
         update(nextCandles,nextZones,nextWatches,levels,nextTool,reset,nextProfiles,vwaps,nextDrawings,nextSelection,nextScope) {
             const range=initialized&&!reset?chart.timeScale().getVisibleLogicalRange():null;
+            const oldTimes=times;
+            let shift=0;
+            if(range && oldTimes.length) {
+                const anchor=Math.max(0,Math.min(oldTimes.length-1,Math.round((range.from+range.to)/2)));
+                const target=nextCandles.findIndex(c=>c.time===oldTimes[anchor]);
+                if(target>=0)shift=target-anchor;
+            }
             candles=nextCandles;times=candles.map(c=>c.time);zones=nextZones;watches=nextWatches;profiles=nextProfiles||[];drawings=nextDrawings||[];
             if(reset || tool!==nextTool) {first=preview=drag=null;focusBounds=null;}
             tool=nextTool;selection=nextSelection;scope=nextScope;buildObjects();setInteraction();
@@ -238,7 +257,7 @@ export function create(host, dotnet) {
                     lineStyle:v.complete?L.LineStyle.Solid:L.LineStyle.Dashed,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:true,title:`${v.period} VWAP`,priceFormat:{type:'price',precision:1,minMove:.1}});
                     line.setData(points);vwapSeries.push(line); } }
             host.dataset.vwapSeries=String(vwapSeries.length);host.dataset.profileId=profiles[0]?.id||'';
-            if(range)chart.timeScale().setVisibleLogicalRange(range);else if(candles.length)chart.timeScale().setVisibleLogicalRange({from:Math.max(0,candles.length-115),to:candles.length+12});
+            if(range)chart.timeScale().setVisibleLogicalRange({from:range.from+shift,to:range.to+shift});else if(candles.length)chart.timeScale().setVisibleLogicalRange({from:Math.max(0,candles.length-115),to:candles.length+12});
             initialized=true;primitive.refresh?.();scheduleLabels();
         },
         focus(kind,id) {

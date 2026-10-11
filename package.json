@@ -1,6 +1,6 @@
 {
   "name": "btc-lens-browser-checks",
   "private": true,
-  "scripts": { "test:browser": "node tools/check-chart-workspace.cjs && node tools/check-profile-history.cjs", "test:order-flow": "node tools/check-order-flow.cjs", "test:price-context": "node tools/check-chart-workspace.cjs && node tools/check-profile-history.cjs" },
+  "scripts": { "test:browser": "node tools/check-chart-workspace.cjs && node tools/check-profile-history.cjs && node tools/check-trend-flow.cjs", "test:order-flow": "node tools/check-order-flow.cjs", "test:price-context": "node tools/check-chart-workspace.cjs && node tools/check-profile-history.cjs" },
   "devDependencies": { "playwright": "1.62.1" }
 }

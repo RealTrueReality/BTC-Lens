@@ -356,17 +356,20 @@ public sealed class MarketEngine
             var observed = samples.TryGetValue(key, out var prior) ? w with { LastSample = prior } : w;
             samples[key] = quote;
             var next = observed with { LastSample = quote };
-            if (WatchRules.Entered(observed, quote, view.Cutoff, continuity, view.Mode == "demo" ? 300_000 : 30_000))
+            var transition = WatchRules.Transition(observed, quote, view.Cutoff, continuity, view.Mode == "demo" ? 300_000 : 30_000);
+            if (transition is not null)
             {
                 next = next with { Triggered = true };
                 var evidence = new { mode = view.Mode, scope = view.Scope, cutoff = view.Cutoff, quote, zone = w.Current,
-                    rule = WatchRules.Version, instrument = view.Instrument, sourceZone = view.Zones.FirstOrDefault(z => z.Id == w.Current.SourceZoneId),
+                    rule = WatchRules.RuleVersion(w.Current), transition, observedBounds = WatchRules.Bounds(w.Current, quote.Timestamp), previousQuote = prior ?? observed.LastSample,
+                    instrument = view.Instrument, sourceZone = view.Zones.FirstOrDefault(z => z.Id == w.Current.SourceZoneId),
                     candles = view.Candles.ToDictionary(x => x.Key, x => x.Value.Where(c => c.Confirmed && c.CloseTime <= view.Cutoff).TakeLast(20).ToArray()),
                     levels = view.Levels, dataStatus = view.Status, orderFlow = View.Flow, priceContext = view.PriceContext.Evidence(view.Cutoff),
                     gaps = view.Candles.Where(x => HasGap(x.Value, view.Cutoff)).Select(x => x.Key).ToArray() };
                 var alert = new AlertEvent(WatchRules.EventId(w), w.Scope, w.Id, w.Current.Revision,
                     DateTimeOffset.FromUnixTimeMilliseconds(quote.Timestamp), quote.Price, quote.Transport, w.Current,
-                    $"价格首次观测进入「{w.Current.Name}」；此事件记录触及，局部确认与目标仍需判断。", JsonCodec.Write(evidence));
+                    w.Current.Trend is null ? $"价格首次观测进入「{w.Current.Name}」；此事件记录触及，局部确认与目标仍需判断。" :
+                    $"价格首次观测{(transition == "cross" ? "穿越趋势线" : "靠近趋势线关注带")}「{w.Current.Name}」；保存当时动态价位，局部反应仍需判断。", JsonCodec.Write(evidence));
                 store.RecordAlert(next, alert);
             }
         }

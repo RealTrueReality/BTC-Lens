@@ -51,3 +51,4 @@ jobs:
             test-results/price-context/
             test-results/chart-workspace/
             test-results/profile-history/
+            test-results/trend-flow/

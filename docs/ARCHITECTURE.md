@@ -42,7 +42,7 @@ SQLite 连接禁用连接池，并自动关闭连接，保证本地文件可以�
 | trades | Id、Mode、Timestamp | 交易、初始风险、成本、复盘、图片、关联事件 |
 | candle_cache | Scope + Instrument + Timeframe + OpenTime | OHLCV、确认状态 |
 | flow_segments | Id、Timestamp=连接时间 | 首笔与最后成交时间、累计主动买卖 BTC、计数、合约元数据、开始/结束原因 |
-| captured_trades | Instrument + TradeId、SegmentId、Timestamp | 聚合原始消息、接收时间、BTC 换算结果 |
+| captured_trades | Exchange + Instrument + TradeId、SegmentId、Timestamp | 聚合原始消息、接收时间、BTC 换算结果；旧 OKX 键格式保留 |
 | cvd_points | SegmentId + Minute、Timestamp=最后成交时间 | 段内累计 CVD、该分钟主动买卖量及消息数 |
 | open_interest | Instrument + Timestamp | 张数、BTC、USD、接收时间与采样来源 |
 
@@ -63,6 +63,8 @@ Scope=live 用于真实行情关注区；每个演示回放使用独立 demo:会
 到区快照包含该截止点前的已确认 K 线、产品参数、关键价格、来源区域、规则版本和数据完整性状态。之后编辑关注区或推进回放不会改变已保存快照。
 
 V0.2 同时保存已提交的订单流快照与段 ID。报告只引用新鲜实盘数据；完整目标资格与个人确认规则仍单独审核。
+
+V0.2.4 的 `BinanceFlowWorker` 独立采集现货与永续；与 OKX 共用事务存储、BTC/USDT 计算和只在提交后发布的 `OrderFlowEngine`。`FlowDisplay` 对所选来源共同覆盖的完整分钟累计；缺口和段变化重新分段。趋势线参数附于关注区版本，`WatchRules` 在每笔观测时间计算边界，事件冻结动态边界与两次观测；旧固定区域行为和历史 JSON 不改写。
 
 V0.2.1 使用独立 `PriceContextWorker` 补充当前周/月起点的已收盘 5m 历史，保存在 `candle_cache` 的 `live:analysis` scope；行情与订单流任务继续各自运行。`PriceContextRules` 执行固定范围近似分配、当前日/周/月 HLC3 VWAP 与覆盖检查。更换可视图表周期不更换计算源。
 

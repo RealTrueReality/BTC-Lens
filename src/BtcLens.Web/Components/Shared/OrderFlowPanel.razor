@@ -2,26 +2,28 @@
 @inject IJSRuntime JS
 @inject ILensStore Store
 <section class="panel flow-panel" data-testid="order-flow">
-    <div class="panel-heading"><div><span class="eyebrow">ORDER FLOW · OKX</span><h2>现货 / 永续订单流</h2></div><div class="flow-controls"><label>采样显示<select aria-label="订单流显示周期" @bind="interval"><option value="1">1m</option><option value="5">5m</option><option value="15">15m</option></select></label><span class="pill @(Flow.Mode == "demo" ? "amber" : "green")">@(Flow.Mode == "demo" ? "合成演示" : "实盘采集")</span></div></div>
+    <div class="panel-heading"><div><span class="eyebrow">ORDER FLOW · PUBLIC TRADES</span><h2>现货 / 永续订单流</h2></div><div class="flow-controls"><label>交易所<select aria-label="订单流交易所" @bind="source"><option value="OKX+Binance">OKX + Binance</option><option value="OKX">OKX</option><option value="Binance">Binance</option></select></label><label>视图<select aria-label="订单流视图" @bind="displayMode"><option value="aggregate">共同起点汇总</option><option value="segments">各采集段</option></select></label><label>范围<select aria-label="订单流时间范围" @bind="windowHours"><option value="1">最近 1h</option><option value="4">最近 4h</option><option value="24">最近 24h</option></select></label><label>单位<select aria-label="CVD 单位" @bind="unit"><option>BTC</option><option>USDT</option></select></label><label>采样显示<select aria-label="订单流显示周期" @bind="interval"><option value="1">1m</option><option value="5">5m</option><option value="15">15m</option></select></label><span class="pill @(Flow.Mode == "demo" ? "amber" : "green")">@(Flow.Mode == "demo" ? "合成演示" : "实盘采集")</span></div></div>
     <div class="flow-metrics">
         @foreach (var instrument in FlowRules.Instruments)
         {
-            var segment = Flow.Latest(instrument);
-            <div class="flow-metric" data-instrument="@instrument"><span class="metric-label">@(instrument == FlowRules.Spot ? "现货 CVD" : "永续 CVD") <small>@instrument</small></span><strong class="mono @(segment?.CvdBtc < 0 ? "negative" : "positive")">@(segment is { Messages: > 0 } ? segment.CvdBtc.ToString("+0.0000;-0.0000;0.0000") : "—") <small>BTC</small></strong><span class="flow-status">@SegmentStatus(segment)</span><small>累计起点：@(segment is { Messages: > 0 } ? LensFormat.Time(segment.StartedAt) : "等待首笔成交")</small><small>最后成交：@(segment?.LastTradeAt is long time ? LensFormat.Time(time) : "—")</small></div>
+            var value = DisplayValue(instrument);
+            <div class="flow-metric" data-instrument="@instrument"><span class="metric-label">@(instrument == FlowRules.Spot ? "现货 CVD" : "永续 CVD") <small>BTC / USDT</small></span><strong class="mono @(value < 0 ? "negative" : "positive")">@(value?.ToString(unit == "BTC" ? "+0.0000;-0.0000;0.0000" : "+#,##0.00;-#,##0.00;0.00") ?? "—") <small>@unit</small></strong><span class="flow-status">@(displayMode == "aggregate" ? value is null ? "等待共同覆盖的完整分钟" : string.Join(" + ",SelectedExchanges) + " · 共同分钟汇总" : "各段数值见曲线")</span><small>累计起点：@(DisplayStart(instrument) is long start ? LensFormat.Time(start) : "等待采集")</small><small>@(displayMode == "aggregate" ? "汇总截止" : "最后成交")：@(DisplayEnd(instrument) is long time ? LensFormat.Time(time) : "—")</small></div>
         }
         <div class="flow-metric"><span class="metric-label">永续 OI <small>BTC-USDT-SWAP</small></span><strong class="mono">@(LatestOi?.CoinBtc.ToString("N2") ?? "—") <small>BTC</small></strong><span class="flow-status">@(LatestOi is null ? "等待 OI" : Flow.Mode == "demo" ? "合成持仓量" : Now - LatestOi.Timestamp > 30_000 ? "样本已过期" : "REST · 10 秒采样")</span><small>@(LatestOi is null ? "张数 / USD：—" : $"{LatestOi.Contracts:N2} 张 / {LatestOi.Usd:N0} USD")</small><small>样本时间：@(LatestOi is null ? "—" : LensFormat.Time(LatestOi.Timestamp))</small></div>
     </div>
     @if (Flow.Error is not null && Flow.Mode == "live") { <div class="flow-error">@Flow.Error；不同段从零重新累计。</div> }
     @if (Flow.OiError is not null && Flow.Mode == "live") { <div class="flow-error">@Flow.OiError</div> }
-    <div class="flow-chart-labels"><span><i class="legend-dot green"></i>现货 CVD · BTC</span><span><i class="legend-dot amber"></i>永续 CVD · BTC</span><span><i class="legend-dot blue"></i>永续 OI · BTC</span></div>
+    <div class="flow-source-status">@foreach (var exchange in SelectedExchanges) { @foreach(var market in FlowRules.Instruments) { <span>@exchange @(market == FlowRules.Spot ? "现货" : "永续") · @SegmentStatus(Flow.Latest(market,exchange))</span> } }</div>
+    @foreach (var item in Flow.SourceErrors.Where(x=>SelectedExchanges.Any(e=>x.Key.StartsWith(e+":")))) { <div class="flow-error">@item.Key · @item.Value</div> }
+    <div class="flow-chart-labels"><span>价格 · USDT</span><span><i class="legend-dot green"></i>现货 CVD + Delta · @unit</span><span><i class="legend-dot amber"></i>永续 CVD + Delta · @unit</span><span><i class="legend-dot blue"></i>永续 OI · BTC</span></div>
     <div class="flow-chart" @ref="host"><div class="chart-loading">正在绘制订单流…</div></div>
-    <div class="flow-caption">@Flow.Status · 时间 UTC+8 · @Flow.Points.Length 个 CVD 点 / @Flow.OpenInterest.Length 个 OI 样本。显示最近 24 小时内各品种最多 6 个采集段（CVD、OI 各最多 3,000 条）；累计起点按每段首笔成交，不按日重置。</div>
-    <p class="flow-note">@(Flow.Mode == "demo" ? "此处是独立合成的订单流和持仓量，用于体验界面；OHLCV 不能还原真实主动买卖成交。" : "仅覆盖 OKX 的两个指定品种。断线、停机和未采集历史不回补；不同累计起点的 CVD 数值不能直接比较。") OI 增加本身不说明新开多单；USD 名义量也会随价格变化。</p>
+    <div class="flow-caption">时间 UTC+8 · @source · @(displayMode == "aggregate" ? "共同分钟从零累计" : "每个原始采集段独立累计") · @Flow.Points.Length 个本地 CVD 点 / @Flow.OpenInterest.Length 个 OKX OI 样本。汇总只使用已收盘且所选交易所共同覆盖的分钟；当前分钟尚未计入。</div>
+    <p class="flow-note">公开数据只覆盖 OKX BTC-USDT / BTC-USDT-SWAP 与 Binance BTCUSDT 现货 / USDT 永续，不代表全市场。汇总缺口和重连会另起一段，窗口内历史不足会从实际共同起点显示；断线、停机及此前未采集的成交不回补。USDT 按每笔成交价计算；旧记录缺少名义量时留空。OI 当前只覆盖 OKX，单位为 BTC。</p>
     <details class="flow-records"><summary>采集记录与缺口 · @Flow.Segments.Length 个分段</summary>
         <div class="flow-record-list">
         @foreach (var segment in Flow.Segments.OrderByDescending(s => s.ConnectedAt).Take(12))
         {
-            <article class="flow-record"><div><b>@segment.Instrument</b><span class="pill">@(segment.EndedAt is null ? "当前段" : "已结束")</span></div><p>首笔 @LensFormat.Time(segment.StartedAt) · @segment.Messages 条聚合消息 / @segment.Matches 笔撮合 · 净 @segment.CvdBtc.ToString("0.########") BTC</p><small>主动买 @segment.BuyBtc.ToString("0.########") / 主动卖 @segment.SellBtc.ToString("0.########") BTC · @segment.Algorithm</small><small>@(segment.EndReason ?? segment.StartReason)</small><code>段 ID：@segment.Id</code>
+            <article class="flow-record"><div><b>@segment.Exchange · @segment.Instrument</b><span class="pill">@(segment.EndedAt is null ? "当前段" : "已结束")</span></div><p>首笔 @LensFormat.Time(segment.StartedAt) · @segment.Messages 条聚合消息 / @segment.Matches 笔撮合 · 净 @segment.CvdBtc.ToString("0.########") BTC</p><small>主动买 @segment.BuyBtc.ToString("0.########") / 主动卖 @segment.SellBtc.ToString("0.########") BTC · @segment.Algorithm</small><small>@(segment.EndReason ?? segment.StartReason)</small><code>段 ID：@segment.Id</code>
             @if (Flow.Mode == "live") { <button class="text-button" @onclick="() => Export(segment)">导出此段最近 500 条成交与当前汇总 ↗</button> }
             </article>
         }
@@ -31,6 +33,26 @@
 </section>
 @code {
     [Parameter] public FlowView Flow { get; set; } = FlowView.Empty;
+    [Parameter] public Candle[] Candles { get; set; } = [];
+    private string source = "OKX+Binance", displayMode = "aggregate", unit = "BTC";
+    private int windowHours = 4;
+    private string[] SelectedExchanges => source.Split('+');
+    private FlowView? displayFlow;
+    private string displayKey = "";
+    private FlowDisplayResult? displayCache;
+    private FlowDisplayResult Display
+    {
+        get
+        {
+            var key=source+":"+windowHours+":"+unit;
+            if(displayFlow!=Flow || displayKey!=key || displayCache is null)
+            { displayCache=FlowDisplay.Build(Flow,SelectedExchanges,Math.Max(0,Flow.AsOf-windowHours*3_600_000L),unit);displayFlow=Flow;displayKey=key; }
+            return displayCache;
+        }
+    }
+    private decimal? DisplayValue(string instrument) => displayMode == "aggregate" ? Display.Points.LastOrDefault(p=>p.Instrument==instrument)?.Cvd : null;
+    private long? DisplayStart(string instrument) { var points=Display.Points.Where(p=>p.Instrument==instrument).ToArray();return points.LastOrDefault() is { } last ? points.First(p=>p.SegmentId==last.SegmentId).Timestamp-60_000 : null; }
+    private long? DisplayEnd(string instrument) => displayMode == "aggregate" ? Display.Points.LastOrDefault(p=>p.Instrument==instrument)?.Timestamp : SelectedExchanges.Select(e=>Flow.Latest(instrument,e)?.LastTradeAt).Max();
     private int interval = 1;
     private ElementReference host;
     private IJSObjectReference? module, chart;
@@ -46,9 +68,14 @@
         {
             if (firstRender) { module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/order-flow.js"); chart = await module.InvokeAsync<IJSObjectReference>("create", host); }
             if (chart is null) return;
-            var next = Flow.Mode + ":" + interval + ":" + (Flow.Mode == "demo" ? Flow.Segments.FirstOrDefault()?.Id : "live");
-            await chart.InvokeVoidAsync("update", Flow.Points.Select(p => new { p.SegmentId, p.Instrument, time = p.Timestamp / 1000, value = p.CvdBtc }),
-                Flow.OpenInterest.Select(s => new { time = s.Timestamp / 1000, value = s.CoinBtc }), interval, next != identity, Flow.Mode == "demo" ? 300 : 30);
+            var next = Flow.Mode + ":" + interval + ":" + source + ":" + displayMode + ":" + unit + ":" + windowHours;
+            var display=Display;
+            var points = displayMode == "aggregate" ? display.Points.Select(p=>new {p.SegmentId,p.Instrument,label=source,time=p.Timestamp/1000,value=p.Cvd,delta=(decimal?)p.Delta}).ToArray() :
+                Flow.Points.Where(p=>SelectedExchanges.Contains(p.Exchange) && p.Timestamp>=display.RequestedStart && (unit=="BTC" || p.CvdUsdt is not null))
+                    .Select(p=>new {p.SegmentId,p.Instrument,label=p.Exchange,time=p.Timestamp/1000,value=unit=="BTC"?p.CvdBtc:p.CvdUsdt!.Value,delta=(decimal?)(unit=="BTC"?p.BuyBtc-p.SellBtc:p.BuyUsdt-p.SellUsdt)}).ToArray();
+            await chart.InvokeVoidAsync("update", points,
+                Flow.OpenInterest.Where(s=>s.Timestamp>=display.RequestedStart).Select(s => new { time = s.Timestamp / 1000, value = s.CoinBtc }), interval, next != identity, Flow.Mode == "demo" ? 300 : 30,
+                Candles.Where(c=>c.CloseTime>=display.RequestedStart).Select(c=>new {time=c.OpenTime/1000,open=c.Open,high=c.High,low=c.Low,close=c.Close}),unit);
             identity = next;
         }
         catch (JSDisconnectedException) { }
@@ -62,7 +89,7 @@
         var json = JsonCodec.Write(new { exportedAt = DateTimeOffset.UtcNow, segment,
             detailCoverage = "Most recent 500 aggregate messages only; full segment summary is separate",
             exportedMessages = trades.Length, completeDetail = trades.LongLength == segment.Messages,
-            quantityUnit = "BTC", source = "OKX public trades channel", trades });
+            quantityUnit = "BTC", source = segment.Exchange + " public taker trades", trades });
         await using var files = await JS.InvokeAsync<IJSObjectReference>("import", "./js/files.js");
         await files.InvokeVoidAsync("download", "btclens-order-flow-" + segment.Id + ".json", json);
     }

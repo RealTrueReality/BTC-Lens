@@ -12,9 +12,9 @@
 :root { --flow-blue: #7b9fd6; }
 .flow-panel { margin-top: 22px; overflow: hidden; }
 .flow-panel h2 { margin-top: 5px; }
-.flow-controls { display: flex; align-items: center; gap: 16px; }
+.flow-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content:flex-end; }
 .flow-controls label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-.flow-controls select { width: 78px; background: #10171b; color: #d2dde3; border: 1px solid #34434a; border-radius: 5px; padding: 5px 8px; }
+.flow-controls select { width: auto; max-width:145px; background: #10171b; color: #d2dde3; border: 1px solid #34434a; border-radius: 5px; padding: 5px 8px; }
 .flow-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); border-top: 1px solid #283238; border-bottom: 1px solid #283238; }
 .flow-metric { padding: 18px 24px; display: flex; flex-direction: column; gap: 5px; border-right: 1px solid #283238; }
 .flow-metric:last-child { border-right: 0; }
@@ -23,7 +23,11 @@
 .flow-metric strong { font-size: 26px; font-weight: 500; }
 .flow-metric strong small { font-size: 12px; color: #86939b; }
 .flow-status { font-size: 12px; color: #c2cdd3; }
-.flow-chart { height: 410px; position: relative; width: 100%; }
+.flow-chart { height: 560px; position: relative; width: 100%; }
+.flow-readout { position:absolute; top:4px; left:8px; right:80px; z-index:2; pointer-events:none; color:#b6c4ce; font-size:10px; background:#13191ddd; }
+.flow-pane-label { position:absolute; left:8px; z-index:2; pointer-events:none; color:#a7b9c5; font-size:10px; background:#13191ddd; }
+.flow-source-status { display:flex; flex-wrap:wrap; gap:10px; padding:12px 24px; color:var(--muted); font-size:11px; }
+.flow-panel>.panel-heading { flex-wrap:wrap; gap:14px; }
 .flow-chart-labels { display: flex; justify-content: space-around; padding: 14px 12px 4px; color: #a5b3bb; font-size: 11px; }
 .legend-dot.blue { background: #7b9fd6; }
 .flow-caption, .flow-note { font-size: 12px; color: #86939b; margin: 12px 24px; line-height: 1.7; }

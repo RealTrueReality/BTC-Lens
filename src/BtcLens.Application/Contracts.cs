@@ -49,7 +49,10 @@ public static class AnalysisReport
         var facts = new List<string>();
         if (market.Quote is not null) facts.Add($"BTC-USDT-SWAP 最新观测价 {market.Quote.Price:0.0}；价格时间 {DateTimeOffset.FromUnixTimeMilliseconds(market.Quote.Timestamp):O}。");
         foreach (var w in watches.Where(w => w.Enabled).Take(8))
-            facts.Add($"关注区「{w.Current.Name}」{w.Current.Timeframe}，{w.Current.Lower:0.0}–{w.Current.Upper:0.0}，版本 {w.Current.Revision}；{(w.Triggered ? "已记录首次到区" : "等待新的到区事件")}。");
+        {
+            var bounds = WatchRules.Bounds(w.Current, market.Quote?.Timestamp ?? market.Cutoff);
+            facts.Add($"{(w.Current.Trend is null ? "关注区" : "动态趋势线关注")}「{w.Current.Name}」{w.Current.Timeframe}，当前 {(bounds is null ? "价格范围无效" : $"{bounds.Lower:0.0}–{bounds.Upper:0.0}")}，版本 {w.Current.Revision}；{(w.Triggered ? "已记录本版本首次事件" : "等待新的观测事件")}。");
+        }
         foreach (var z in market.Zones.Where(z => z.Life == ZoneLife.Active).OrderByDescending(z => z.KnownAt).Take(6))
             facts.Add($"{z.Timeframe} {z.Kind} {z.Bias}，{z.Lower:0.0}–{z.Upper:0.0}，确认时间 {DateTimeOffset.FromUnixTimeMilliseconds(z.KnownAt):O}，算法 {z.Algorithm}；证据 ID {z.Id}。");
         var missing = new List<string> { "主目标及其来源资格尚未人工确认。", "Sweep、SFP 与有效 MSB 的个人规则尚待逐项定义。" };
@@ -68,12 +71,13 @@ public static class AnalysisReport
             if (!r.Coverage.Complete) missing.Add($"固定范围「{p.Name}」存在缺失或冲突数据；计算仅代表已覆盖部分。");
         }
         if (market.PriceContext.Error is not null) missing.Add(market.PriceContext.Error);
+        foreach (var exchange in FlowRules.Exchanges)
         foreach (var instrument in FlowRules.Instruments)
         {
-            var segment = market.Flow.Latest(instrument);
+            var segment = market.Flow.Latest(instrument, exchange);
             if (market.Mode == "live" && segment is { Messages: > 0, EndedAt: null } && segment.LastTradeAt <= market.Cutoff && market.Cutoff - segment.LastTradeAt <= 30_000)
-                facts.Add($"{instrument} 观测成交 CVD {segment.CvdBtc:0.########} BTC，累计自 {DateTimeOffset.FromUnixTimeMilliseconds(segment.StartedAt):O}，段 ID {segment.Id}；仅 OKX 单品种，缺口前后分别累计。");
-            else missing.Add($"{instrument} CVD 未采集、已过期或为合成演示，不能用作实盘确认。");
+                facts.Add($"{exchange} {instrument} 观测成交 CVD {segment.CvdBtc:0.########} BTC，累计自 {DateTimeOffset.FromUnixTimeMilliseconds(segment.StartedAt):O}，段 ID {segment.Id}；单品种、单段，缺口前后分别累计。");
+            else missing.Add($"{exchange} {instrument} CVD 未采集、已过期或为合成演示，不能用作实盘确认。");
         }
         if (market.Mode == "live" && market.Flow.OpenInterest.LastOrDefault() is { } oi && oi.Timestamp <= market.Cutoff && market.Cutoff - oi.Timestamp <= 30_000)
             facts.Add($"BTC-USDT-SWAP OI {oi.Contracts:0.########} 张 / {oi.CoinBtc:0.########} BTC / {oi.Usd:0.##} USD；时间 {DateTimeOffset.FromUnixTimeMilliseconds(oi.Timestamp):O}。OI 本身不确定多空方向。");
