@@ -8,19 +8,21 @@ public sealed class MarketEngine
     private readonly ILensStore store;
     private readonly OkxClient okx;
     private readonly OrderFlowEngine? orderFlow;
+    private readonly TimeProvider clock;
+    private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Candle[] fixture = DemoMarket.Generate();
     private MarketView view = MarketView.Empty;
     private readonly Dictionary<string, PriceSample> samples = new();
     private Candle[] contextCache = [];
     private string contextStatus = "等待 5m 历史", contextError = "";
-    public MarketView View { get { var state = Volatile.Read(ref view); return state.Mode == "live" ? state with { Flow = orderFlow?.View ?? FlowView.Empty, Cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() } : state; } }
+    public MarketView View { get { var state = Volatile.Read(ref view); return state.Mode == "live" ? state with { Flow = orderFlow?.View ?? FlowView.Empty, Cutoff = Now } : state; } }
     public event Action? Changed;
 
-    public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null)
+    public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null, TimeProvider? timeProvider = null)
     {
-        this.store = store; this.okx = okx; this.orderFlow = orderFlow;
-        var earliest = DateTimeOffset.UtcNow.AddDays(-40).ToUnixTimeMilliseconds();
+        this.store = store; this.okx = okx; this.orderFlow = orderFlow; clock = timeProvider ?? TimeProvider.System;
+        var earliest = clock.GetUtcNow().AddDays(-40).ToUnixTimeMilliseconds();
         contextCache = store.ReadCandles("live:analysis").Where(c => c.OpenTime >= earliest).ToArray();
         if (orderFlow is not null) orderFlow.Changed += Notify;
         var session = store.GetSetting("demo-session") ?? Guid.NewGuid().ToString("N")[..10];
@@ -47,8 +49,8 @@ public sealed class MarketEngine
             state.Mode == "live" && contextError.Length > 0 ? contextError : null, offset,
             state.Instrument is null ? [] : PriceContextRules.Vwaps(state.ContextCandles, state.Cutoff, state.Instrument, offset), store.Profiles(state.Scope)) };
     }
-    private static MarketView LiveEmpty() => new("live", "live", "正在连接 OKX", "等待行情", null, null, null,
-        DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), new Dictionary<string, Candle[]>(), [], [], 0, 0);
+    private MarketView LiveEmpty() => new("live", "live", "正在连接 OKX", "等待行情", null, null, null,
+        Now, new Dictionary<string, Candle[]>(), [], [], 0, 0);
     private static DetectedZone[] Detect(Dictionary<string, Candle[]> candles, long cutoff) =>
         candles.Where(x => Timeframes.All.Contains(x.Key)).SelectMany(x => Indicators.Detect(x.Value, cutoff)).ToArray();
 
@@ -106,7 +108,7 @@ public sealed class MarketEngine
         var instrumentTask = okx.InstrumentAsync(ct);
         await Task.WhenAll(tasks.Cast<Task>().Append(instrumentTask));
         var result = tasks.Select(t => t.Result).ToArray(); var instrument = instrumentTask.Result;
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = Now;
         var candles = result.ToDictionary(x => x.tf, x => x.bars);
         await gate.WaitAsync(ct);
         try
@@ -122,7 +124,7 @@ public sealed class MarketEngine
     }
     public async Task AcceptLiveQuoteAsync(PriceSample quote, CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = Now;
         if (quote.Price <= 0 || now - quote.Timestamp > 30_000 || quote.Timestamp > now + 5000) return;
         await gate.WaitAsync(ct);
         try
@@ -147,7 +149,7 @@ public sealed class MarketEngine
     {
         var state = View;
         if (state.Mode != "live" || state.Instrument is null) return;
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = Now;
         var start = new[] { 0, 8 }.SelectMany(offset => new[] { "week", "month" }.Select(p => PriceContextRules.Anchor(now, p, offset))).Min();
         var end = now / PriceContextRules.Step * PriceContextRules.Step;
         var existing = state.ContextCandles.Select(c => c.OpenTime).ToHashSet();
@@ -167,9 +169,9 @@ public sealed class MarketEngine
             {
                 ct.ThrowIfCancellationRequested();
                 if (view.Mode != "live") return;
-                MergeContext(older.Where(c => c.OpenTime >= start), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                MergeContext(older.Where(c => c.OpenTime >= start), Now);
                 contextStatus = "正在补充 5m 历史 · 已加载 " + contextCache.Length + " 根"; contextError = "";
-                view = Enrich(view with { ContextCandles = contextCache, Cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+                view = Enrich(view with { ContextCandles = contextCache, Cutoff = Now });
             }
             finally { gate.Release(); }
             Notify(); cursor = older.Min(c => c.OpenTime);
@@ -184,7 +186,7 @@ public sealed class MarketEngine
         {
             if (view.Mode != "live") return;
             contextStatus = status; contextError = error ?? "";
-            view = Enrich(view with { ContextCandles = contextCache, Cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+            view = Enrich(view with { ContextCandles = contextCache, Cutoff = Now });
         }
         finally { gate.Release(); }
         Notify();
@@ -223,7 +225,7 @@ public sealed class MarketEngine
         try
         {
             if (view.Mode != "live") return;
-            var stale = view.Quote is null || DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - view.Quote.Timestamp > 30_000;
+            var stale = view.Quote is null || Now - view.Quote.Timestamp > 30_000;
             view = view with { Error = message, Status = stale ? "数据过期 · 到区提醒暂停" : "部分数据暂不可用" };
         }
         finally { gate.Release(); }

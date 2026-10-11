@@ -12,13 +12,14 @@ public sealed class HistoryContextTests
     {
         var directory = Path.Combine(Path.GetTempPath(), "btclens-history-" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(directory, "test.db");
-        var handler = new PublicHistory();
+        var clock = new FixedClock();
+        var handler = new PublicHistory(clock);
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://example.test/") };
         try
         {
             using (var store = new LensStore(path))
             {
-                var market = new MarketEngine(store, new OkxClient(http)); await market.SwitchModeAsync("live");
+                var market = new MarketEngine(store, new OkxClient(http), timeProvider: clock); await market.SwitchModeAsync("live");
                 await market.RefreshLiveAsync(default);
                 Assert.Contains(market.View.PriceContext.Vwaps, v => !v.Coverage.Complete);
                 await market.LoadContextHistoryAsync(default);
@@ -31,8 +32,12 @@ public sealed class HistoryContextTests
             var count = handler.Cursors.Count;
             using (var store = new LensStore(path))
             {
-                var market = new MarketEngine(store, new OkxClient(http)); await market.RefreshLiveAsync(default); await market.LoadContextHistoryAsync(default);
+                var market = new MarketEngine(store, new OkxClient(http), timeProvider: clock); await market.RefreshLiveAsync(default); await market.LoadContextHistoryAsync(default);
                 Assert.Equal(count, handler.Cursors.Count); Assert.All(market.View.PriceContext.Vwaps, v => Assert.True(v.Coverage.Complete));
+                clock.Advance(TimeSpan.FromMinutes(5));
+                await market.LoadContextHistoryAsync(default);
+                Assert.Equal(count + 1, handler.Cursors.Count);
+                Assert.All(market.View.PriceContext.Vwaps, v => Assert.True(v.Coverage.Complete));
             }
         }
         finally
@@ -42,12 +47,18 @@ public sealed class HistoryContextTests
             if (Directory.Exists(resolved)) Directory.Delete(resolved, true);
         }
     }
-    private sealed class PublicHistory : HttpMessageHandler
+    private sealed class FixedClock : TimeProvider
+    {
+        private DateTimeOffset now = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan duration) => now += duration;
+    }
+    private sealed class PublicHistory(TimeProvider clock) : HttpMessageHandler
     {
         public List<long> Cursors { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            var uri = request.RequestUri!.ToString(); var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var uri = request.RequestUri!.ToString(); var now = clock.GetUtcNow().ToUnixTimeMilliseconds();
             object[] data;
             if (uri.Contains("instruments")) data = [new { instId = "BTC-USDT-SWAP", tickSz = "0.1", ctVal = "0.01", ctValCcy = "BTC" }];
             else
