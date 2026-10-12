@@ -67,4 +67,12 @@ public sealed class MultiExchangeFlowTests
         Assert.Empty(FlowDisplay.Build(view,FlowRules.Exchanges,T,"USDT").Points);
         Assert.Throws<ArgumentException>(()=>FlowDisplay.Build(view,["Unknown"],T,"BTC"));
     }
+    [Fact] public void PartialEndedSegmentCannotHideACompleteMinuteFromAnotherSegment()
+    {
+        var view=Fixture();var existing=view.Segments.First(s=>s.Exchange==FlowRules.Okx && s.Instrument==FlowRules.Spot);
+        var partial=existing with {Id="partial",EndedAt=T+20_000,LastTradeAt=T+19_000};
+        var row=view.Points.First(p=>p.SegmentId==existing.Id && p.Minute==T) with {Id="partial-point",SegmentId="partial",Timestamp=T+19_000};
+        var result=FlowDisplay.Build(view with {Segments=[..view.Segments,partial],Points=[..view.Points,row]},FlowRules.Exchanges,T,"BTC");
+        Assert.Equal(6,result.Points.Length);Assert.Equal(0,result.MissingMinutes);
+    }
 }

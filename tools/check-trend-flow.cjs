@@ -21,7 +21,7 @@ const base=process.env.BTC_LENS_URL||'http://127.0.0.1:5081';
   await card.getByRole('button',{name:'删除',exact:true}).click();await card.waitFor({state:'hidden'});checks.push('trend drawing promotion / moving band / distance edit / version and refresh / deletion');
   assert.ok((await page.request.post(base+'/test/flow-fixture')).ok());await page.reload();await page.waitForSelector('.flow-chart canvas');
   await page.waitForFunction(()=>Number(document.querySelector('.flow-chart')?.dataset.cvdPoints)>0);
-  assert.equal(await page.locator('.flow-chart').getAttribute('data-panes'),'4');assert.ok(Number(await page.locator('.flow-chart').getAttribute('data-price-bars'))>0);
+  assert.equal(await page.locator('.flow-chart').getAttribute('data-panes'),'4');assert.ok(Number(await page.locator('.flow-chart').getAttribute('data-main-cvd-points'))>0);assert.equal(await page.locator('.flow-chart').getAttribute('data-style'),'candles');
   assert.match(await page.locator('.flow-source-status').innerText(),/Binance/);assert.match(await page.locator('.flow-caption').innerText(),/共同分钟/);
   await page.getByLabel('CVD 单位',{exact:true}).selectOption('USDT');await page.waitForFunction(()=>document.querySelector('.flow-chart')?.dataset.unit==='USDT');
   await page.getByLabel('订单流交易所',{exact:true}).selectOption('OKX');await page.getByLabel('订单流显示周期',{exact:true}).selectOption('5');

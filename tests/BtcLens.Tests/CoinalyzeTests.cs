@@ -50,6 +50,17 @@ public sealed class CoinalyzeTests
         Assert.Throws<ArgumentException>(()=>CoinalyzeClient.ValidateSelection(Enumerable.Range(0,15).Select(n=>Markets[1] with {Symbol="p"+n}).Append(Markets[0]).ToArray()));
         CoinalyzeClient.ValidateSelection(Markets);
     }
+    [Fact] public void DefaultVenuesSeparateSpotAndPerpetualAndDoNotSelectEmptyIntegrationMarkets()
+    {
+        var spot=new[]{"Binance","Coinbase","Bybit","Kraken","Bitfinex","BitFlyer"}.Select(n=>new ProviderMarket(n+".s",n,FlowRules.Spot,"USD","BTC"));
+        var perps=new[]{"Binance","Coinbase","OKX","Bybit","Huobi","Deribit","dYdX","Kraken","Bitfinex"}.Select(n=>new ProviderMarket(n+".p",n,FlowRules.Perpetual,"USDT","BTC"));
+        var all=spot.Concat(perps).Append(new("Coinbase.usdt","Coinbase",FlowRules.Spot,"USDT","BTC")).ToArray();
+        var defaults=CoinalyzeClient.DefaultSelection(all);
+        Assert.Equal(8,defaults.Length);Assert.Contains("Coinbase.s",defaults);Assert.DoesNotContain("Coinbase.usdt",defaults);
+        Assert.DoesNotContain("BitFlyer.s",defaults);Assert.DoesNotContain("Coinbase.p",defaults);Assert.DoesNotContain("Kraken.p",defaults);Assert.DoesNotContain("Bitfinex.p",defaults);
+        CoinalyzeClient.ValidateSelection(all.Where(m=>defaults.Contains(m.Symbol)).ToArray());
+        Assert.Equal(2,CoinalyzeClient.DefaultSelection(Markets).Length);
+    }
     [Fact] public async Task ProviderCacheSurvivesRestartButChangedSelectionCannotRestoreOldMarkets()
     {
         var path=Path.Combine(Path.GetTempPath(),"btclens-provider-"+Guid.NewGuid().ToString("N"),"test.db");
@@ -59,7 +70,7 @@ public sealed class CoinalyzeTests
             string? key=OfflineCoinalyzeHandler.Key;var engine=new CoinalyzeEngine(client,store,()=>key);
             var markets=await engine.VerifyAsync(key,default);engine.Configure(markets,markets.Select(m=>m.Symbol).ToArray());await engine.RefreshAsync(default);
             Assert.NotEmpty(engine.View.Volumes);var restored=new CoinalyzeEngine(client,store,()=>key);Assert.Equal(engine.View.Volumes,restored.View.Volumes);
-            var reduced=markets.Where(m=>m.Exchange=="A").Select(m=>m.Symbol).ToArray();engine.Configure(markets,reduced);
+            var reduced=markets.Where(m=>m.ExchangeCode=="A").Select(m=>m.Symbol).ToArray();engine.Configure(markets,reduced);
             restored=new CoinalyzeEngine(client,store,()=>key);Assert.Equal(reduced,restored.View.Selected);Assert.Empty(restored.View.Volumes);Assert.Equal(0,restored.View.FetchedAt);
             await engine.RefreshAsync(default);Assert.NotEmpty(engine.View.Volumes);var before=engine.View.Volumes;
             key="invalid";await engine.RefreshAsync(default);Assert.NotNull(engine.View.Error);Assert.Same(before,engine.View.Volumes);Assert.False(engine.View.Fresh(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
@@ -78,7 +89,8 @@ public sealed class CoinalyzeTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct)
         {
             var path=request.RequestUri!.AbsolutePath;Requests.Add((request.RequestUri.ToString(),request.Headers.GetValues("api_key").Single()));
-            var json=path.EndsWith("spot-markets")?"""[{"symbol":"spot.A","exchange":"A","base_asset":"BTC","quote_asset":"USD","has_buy_sell_data":true}]""":
+            var json=path.EndsWith("exchanges")?"""[{"code":"A","name":"Binance"},{"code":"B","name":"OKX"}]""":
+                path.EndsWith("spot-markets")?"""[{"symbol":"spot.A","exchange":"A","base_asset":"BTC","quote_asset":"USD","has_buy_sell_data":true}]""":
                 path.EndsWith("future-markets")?"""[{"symbol":"perp.B","exchange":"B","base_asset":"BTC","quote_asset":"USDT","margined":"STABLE","oi_lq_vol_denominated_in":"BASE_ASSET","is_perpetual":true,"has_buy_sell_data":true,"has_ohlcv_data":true},{"symbol":"inverse.B","exchange":"B","base_asset":"BTC","quote_asset":"USD","margined":"COIN","oi_lq_vol_denominated_in":"QUOTE_ASSET","is_perpetual":true,"has_buy_sell_data":true,"has_ohlcv_data":true}]""":
                 path.EndsWith("open-interest-history")?"""[{"symbol":"perp.B","history":[{"t":1799999940,"c":100}]}]""":
                 """[{"symbol":"spot.A","history":[{"t":1799999940,"o":100,"h":110,"l":90,"c":105,"v":10,"bv":7}]}]""";

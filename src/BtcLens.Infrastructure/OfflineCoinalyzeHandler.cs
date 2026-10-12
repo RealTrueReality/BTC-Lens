@@ -16,7 +16,8 @@ public sealed class OfflineCoinalyzeHandler:HttpMessageHandler
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized){Content=new StringContent("Invalid test key")});
         var path=request.RequestUri!.AbsolutePath;
         object result;
-        if(path.EndsWith("spot-markets"))result=new[]{"A","B"}.Select(e=>new {symbol="BTCUSDT."+e,exchange=e,base_asset="BTC",quote_asset="USDT",has_buy_sell_data=true});
+        if(path.EndsWith("exchanges"))result=new[]{"A","B"}.Select(e=>new {code=e,name="Test "+e});
+        else if(path.EndsWith("spot-markets"))result=new[]{"A","B"}.Select(e=>new {symbol="BTCUSDT."+e,exchange=e,base_asset="BTC",quote_asset="USDT",has_buy_sell_data=true});
         else if(path.EndsWith("future-markets"))result=new[]{"A","B"}.Select(e=>new {symbol="BTCUSDT_PERP."+e,exchange=e,base_asset="BTC",quote_asset="USDT",is_perpetual=true,margined="STABLE",oi_lq_vol_denominated_in="BASE_ASSET",has_ohlcv_data=true,has_buy_sell_data=true});
         else
         {

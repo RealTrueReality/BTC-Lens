@@ -58,3 +58,4 @@ jobs:
             test-results/profile-history/
             test-results/trend-flow/
             test-results/market-reading/
+            test-results/personal-analysis/

@@ -1,93 +1,38 @@
-export function create(host) {
-    host.replaceChildren();
-    const L = window.LightweightCharts;
-    const chart = L.createChart(host, {
-        autoSize: true,
-        layout: { background: { color: '#13191d' }, textColor: '#86939b', fontSize: 11,
-            attributionLogo: true, panes: { separatorColor: '#34434a', separatorHoverColor: '#53616a' } },
-        grid: { vertLines: { color: '#20282d' }, horzLines: { color: '#20282d' } },
-        rightPriceScale: { borderColor: '#283238', minimumWidth: 78 },
-        timeScale: { borderColor: '#283238', timeVisible: true, secondsVisible: true, rightOffset: 2,
-            tickMarkFormatter: (t, kind) => new Date(t * 1000).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...(kind === L.TickMarkType.TimeWithSeconds ? {second:'2-digit'} : {}) }) },
-        localization: { locale: 'zh-CN', timeFormatter: t => new Date(t * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
-    });
-    const lines = new Map();
-    const histograms = new Map();
-    const price = chart.addSeries(L.CandlestickSeries,{upColor:'#59b99e',downColor:'#dd787b',borderVisible:false,wickUpColor:'#59b99e',wickDownColor:'#dd787b',priceLineVisible:false,lastValueVisible:true},0);
-    const readout=document.createElement('div');readout.className='flow-readout';host.append(readout);
-    const paneLabels=['价格 · OKX 永续 · USDT','现货 CVD / Delta','永续 CVD / Delta','OI · OKX 永续 · BTC'].map(name=>{
-        const element=document.createElement('div');element.className='flow-pane-label';element.textContent=name;host.append(element);return element;
-    });
-    const values=new Map();let currentUnit='BTC',currentOiSource='OKX';
-    chart.subscribeCrosshairMove(event=>{
-        if(!event.time){readout.textContent='移动光标查看同一时刻的价格、CVD 与 OI';return;}
-        const parts=[new Date(event.time*1000).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai'})];
-        const candle=event.seriesData.get(price);if(candle)parts.push('价格 '+candle.close.toFixed(1)+' USDT');
-        for(const [id,line] of lines){const item=event.seriesData.get(line);if(item && !id.startsWith('empty-'))parts.push((id.startsWith('oi-')?currentOiSource+' OI':values.get(id)||'CVD')+' '+item.value.toFixed(4)+' '+(id.startsWith('oi-')?'BTC':currentUnit));}
-        for(const [id,line] of histograms){const item=event.seriesData.get(line);if(item)parts.push((values.get(id)||'')+' Delta '+item.value.toFixed(4)+' '+currentUnit);}
-        readout.textContent=parts.join(' · ');
-    });
-    let hadData = false;
-    function getLine(id, pane, color) {
-        if (!lines.has(id)) lines.set(id, chart.addSeries(L.LineSeries, {
-            color, lineWidth: 2, priceLineVisible: false, lastValueVisible: true, pointMarkersVisible: true, pointMarkersRadius: 2,
-            priceFormat: { type: 'price', precision: pane === 3 ? 2 : 4, minMove: pane === 3 ? .01 : .0001 }
-        }, pane));
-        return lines.get(id);
+export function create(host){
+ host.replaceChildren();const L=window.LightweightCharts;
+ const chart=L.createChart(host,{autoSize:true,layout:{background:{color:'#13191d'},textColor:'#86939b',fontSize:11,attributionLogo:true,panes:{separatorColor:'#34434a'}},grid:{vertLines:{color:'#20282d'},horzLines:{color:'#20282d'}},rightPriceScale:{minimumWidth:78,borderColor:'#283238',scaleMargins:{top:.20,bottom:.08}},timeScale:{borderColor:'#283238',timeVisible:true,rightOffset:2,tickMarkFormatter:t=>new Date(t*1000).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit'})},localization:{locale:'zh-CN',timeFormatter:t=>new Date(t*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})},crosshair:{mode:L.CrosshairMode.Normal}});
+ const series=new Map(),names=new Map(),headers=[],latest=new Map();let unit='BTC',titles=[],hadData=false,hovered=null;
+ const compact=n=>new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:Math.abs(n)<10?4:3}).format(n);
+ for(let pane=0;pane<4;pane++){const label=document.createElement('div');label.className='flow-pane-label indicator-pane-label';label.dataset.pane=pane;host.append(label);headers.push(label);add('empty-'+pane,pane,'line').setData([]);}
+ for(const pane of chart.panes())if(typeof pane.setStretchFactor==='function')pane.setStretchFactor(1);
+ function add(id,pane,type){if(!series.has(id)){const options={priceLineVisible:false,lastValueVisible:true,priceFormat:{type:'custom',minMove:.0001,formatter:compact}};const value=type==='candle'?chart.addSeries(L.CandlestickSeries,{...options,upColor:'#32b5a0',downColor:'#ef5964',borderVisible:false,wickUpColor:'#32b5a0',wickDownColor:'#ef5964'},pane):type==='delta'?chart.addSeries(L.HistogramSeries,{...options,priceScaleId:'delta-'+pane,lastValueVisible:false,priceFormat:{type:'volume'}},pane):chart.addSeries(L.LineSeries,{...options,color:pane===2?'#e9ad62':pane===3?'#7b9fd6':'#32b5a0',lineWidth:1,pointMarkersVisible:false},pane);series.set(id,value);names.set(id,{pane,type});}return series.get(id);}
+ function header(pane,item){const label=headers[pane];label.replaceChildren();const title=document.createElement('span');title.textContent=titles[pane]||'';label.append(title);if(item){const value=document.createElement('strong');value.className=item.close!==undefined&&item.close<item.open?'negative':'positive';value.textContent=item.close===undefined?' '+compact(item.value)+' '+(pane===3?'BTC':unit):' 开 '+compact(item.open)+' 高 '+compact(item.high)+' 低 '+compact(item.low)+' 收 '+compact(item.close);label.append(value);}}
+ chart.subscribeCrosshairMove(event=>{const found=new Map();for(const [id,s] of series){const meta=names.get(id),row=event.seriesData.get(s);if(row && meta.type!=='delta' && !id.startsWith('empty-'))found.set(meta.pane,row);}hovered=event.time?found:null;for(let p=0;p<4;p++)header(p,hovered?hovered.get(p):latest.get(p));});
+ function sampled(rows,minutes){const map=new Map();for(const row of rows)map.set(Math.floor((row.time-1)/(minutes*60)),{time:row.time,value:row.value});return [...map.values()].sort((a,b)=>a.time-b.time);}
+ function lineGroups(rows,maxGap){const groups=[];let group=[];for(const row of rows){if(group.length && row.time-group.at(-1).time>maxGap){groups.push(group);group=[];}group.push(row);}if(group.length)groups.push(group);return groups;}
+ return{
+  update(points,oi,interval,reset,maxOiGap=30,candles=[],nextUnit='BTC',oiSource='OKX',options={style:'price',showDelta:true,bars:[],main:[]}){
+   unit=nextUnit;const used=new Set(['empty-0','empty-1','empty-2','empty-3']),bars=options.bars||[];latest.clear();
+   titles=[options.style==='price'?'价格 · OKX 永续 · USDT':'<OKX> 永续 CVD · '+unit,'聚合现货 CVD · '+unit,'聚合合约 CVD · '+unit,'<'+oiSource+'> 持仓 OI · BTC'];
+   const paneData=[options.main||[],points.filter(p=>p.instrument==='BTC-USDT'),points.filter(p=>p.instrument==='BTC-USDT-SWAP'),oi];
+   let barCount=0,cvdGroups=0;
+   for(let pane=0;pane<4;pane++){
+    if(pane===0 && options.style==='price'){const id='price';used.add(id);add(id,0,'candle').setData(candles);latest.set(0,candles.at(-1));continue;}
+    const groups=new Map();for(const row of bars.filter(b=>b.pane===pane)){if(!groups.has(row.group))groups.set(row.group,[]);groups.get(row.group).push(row);}
+    const useCandles=options.style==='candles' && groups.size>0;
+    if(useCandles){for(const [group,rows] of [...groups].slice(-6)){const id='candle:'+pane+':'+group;used.add(id);add(id,pane,'candle').setData(rows);barCount+=rows.length;latest.set(pane,rows.at(-1));if(pane<3)cvdGroups++;}const basis=[...new Set(bars.filter(b=>b.pane===pane).map(b=>b.basis))];titles[pane]+=' · '+(basis.every(b=>b==='observed_trades')?'观测成交 K线':'采样 K线');}
+    else{
+     const rows=paneData[pane];const bySegment=pane===3?lineGroups(rows,maxOiGap):[...Map.groupBy(rows,r=>r.segmentId).values()];
+     for(const group of bySegment.slice(-6)){if(!group.length)continue;const id='line:'+pane+':'+(group[0].segmentId||group[0].time);used.add(id);const samples=sampled(group,interval);add(id,pane,'line').setData(samples);latest.set(pane,samples.at(-1));if(pane<3)cvdGroups++;}
+     titles[pane]+=' · '+(rows.length===0?'暂无数据':options.style==='candles'?'高低点不足，显示折线':'折线');
     }
-    // Shared price / spot / perpetual / OI time axis, including empty collectors.
-    getLine('empty-spot', 1, '#59b99e'); getLine('empty-perp', 2, '#e9ad62'); getLine('empty-oi', 3, '#7b9fd6');
-    function deltaLine(id,pane){
-        if(!histograms.has(id))histograms.set(id,chart.addSeries(L.HistogramSeries,{priceScaleId:'delta-'+pane,priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}},pane));
-        return histograms.get(id);
-    }
-    function sample(rows, minutes) {
-        const buckets = new Map();
-        for (const row of rows) buckets.set(Math.floor((row.time - 1) / (minutes * 60)), { time: row.time, value: row.value });
-        return [...buckets.values()].sort((a, b) => a.time - b.time);
-    }
-    return {
-        update(points, oi, interval, reset, maxOiGap = 30, candles = [], unit = 'BTC', oiSource='OKX') {
-            currentUnit=unit;currentOiSource=oiSource;paneLabels[3].textContent='OI · '+oiSource+' · BTC';price.setData(candles);
-            const used = new Set(['empty-spot', 'empty-perp', 'empty-oi']);
-            for (const instrument of ['BTC-USDT', 'BTC-USDT-SWAP']) {
-                const groups = new Map();
-                for (const point of points.filter(p => p.instrument === instrument)) {
-                    if (!groups.has(point.segmentId)) groups.set(point.segmentId, []);
-                    groups.get(point.segmentId).push(point);
-                }
-                for (const [id, rows] of [...groups.entries()].slice(-6)) {
-                    const key = 'cvd-' + id; used.add(key);
-                    const pane=instrument === 'BTC-USDT'?1:2;
-                    const line=getLine(key,pane,instrument === 'BTC-USDT'?'#59b99e':'#e9ad62');
-                    line.applyOptions({priceFormat:{type:'price',precision:unit==='BTC'?4:2,minMove:unit==='BTC'?.0001:.01}});
-                    line.setData(sample(rows, interval));values.set(key,(rows[0]?.label||'')+' '+(instrument === 'BTC-USDT'?'现货 CVD':'永续 CVD'));
-                    const buckets=new Map();for(const row of rows){if(row.delta===null || row.delta===undefined)continue;const k=Math.floor((row.time-1)/(interval*60));const old=buckets.get(k);buckets.set(k,{time:row.time,value:(old?.value||0)+row.delta});}
-                    deltaLine(key,pane).setData([...buckets.values()].sort((a,b)=>a.time-b.time).map(r=>({...r,color:r.value>=0?'#59b99e45':'#dd787b45'})));
-                }
-            }
-            let oiGroups = [], group = [];
-            for (const row of oi) {
-                if (group.length && row.time - group.at(-1).time > maxOiGap) { oiGroups.push(group); group = []; }
-                group.push(row);
-            }
-            if (group.length) oiGroups.push(group);
-            for (const rows of oiGroups.slice(-6)) {
-                const key = 'oi-' + rows[0].time; used.add(key);
-                getLine(key, 3, '#7b9fd6').setData(sample(rows, interval));
-            }
-            for (const [key, line] of lines) if (!used.has(key)) { chart.removeSeries(line); lines.delete(key); }
-            for (const [key, line] of histograms) if (!used.has(key)) { chart.removeSeries(line); histograms.delete(key);values.delete(key); }
-            const hasData = points.length > 0 || oi.length > 0;
-            if (hasData && (reset || !hadData)) chart.timeScale().fitContent();
-            hadData = hasData;
-            host.dataset.cvdPoints = String(points.length);
-            host.dataset.oiSamples = String(oi.length);
-            host.dataset.segments = String([...used].filter(k => k.startsWith('cvd-')).length);
-            host.dataset.oiSegments = String(oiGroups.slice(-6).length);
-            host.dataset.priceBars=String(candles.length);host.dataset.unit=unit;host.dataset.panes=String(chart.panes().length);
-            let top=18;for(const [index,pane] of chart.panes().entries()){if(paneLabels[index]){paneLabels[index].style.top=top+'px';if(index===1 || index===2)paneLabels[index].textContent=(index===1?'现货':'永续')+' CVD / Delta · '+unit;}top+=pane.getHeight();}
-        },
-        dispose() { chart.remove();readout.remove();paneLabels.forEach(e=>e.remove()); }
-    };
+    if(options.showDelta && (pane===1 || pane===2)){const buckets=new Map();for(const row of paneData[pane]){if(row.delta===null || row.delta===undefined)continue;const k=Math.floor((row.time-1)/(interval*60));const old=buckets.get(k);buckets.set(k,{time:row.time,value:(old?.value||0)+row.delta});}const id='delta:'+pane;used.add(id);add(id,pane,'delta').setData([...buckets.values()].sort((a,b)=>a.time-b.time).map(r=>({...r,color:r.value>=0?'#32b5a045':'#ef596445'})));}
+   }
+   for(const [id,s] of series)if(!used.has(id)){chart.removeSeries(s);series.delete(id);names.delete(id);}
+   const hasData=points.length>0 || oi.length>0 || (options.main||[]).length>0;if(hasData && (reset || !hadData))chart.timeScale().fitContent();hadData=hasData;
+   if(reset)hovered=null;let top=7;for(const [i,pane] of chart.panes().entries()){headers[i].style.top=top+'px';header(i,hovered?hovered.get(i):latest.get(i));top+=pane.getHeight();}
+   Object.assign(host.dataset,{cvdPoints:String(points.length),mainCvdPoints:String((options.main||[]).length),oiSamples:String(oi.length),segments:String(cvdGroups),oiSegments:String(lineGroups(oi,maxOiGap).length),priceBars:String(options.style==='price'?candles.length:0),unit,panes:String(chart.panes().length),indicatorBars:String(barCount),style:options.style,delta:String(!!options.showDelta)});
+  },
+  dispose(){chart.remove();headers.forEach(h=>h.remove());}
+ };
 }

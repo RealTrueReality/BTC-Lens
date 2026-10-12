@@ -21,12 +21,18 @@ builder.Services.AddSingleton<ILensStore>(_ => new LensStore(databasePath));
 var protection=builder.Services.AddDataProtection().SetApplicationName("BtcLens").PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(Path.GetDirectoryName(databasePath)!,"data-protection-keys")));
 if(OperatingSystem.IsWindows())protection.ProtectKeysWithDpapi();
 builder.Services.AddSingleton<CoinalyzeConnection>();
+builder.Services.AddSingleton<StudyStore>();
+builder.Services.AddSingleton<ModelConnection>();
+var qianwenHttp=builder.Services.AddHttpClient<QianwenClient>(client=>{client.BaseAddress=new Uri(QianwenClient.BaseUrl);client.Timeout=TimeSpan.FromSeconds(120);})
+    .ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler{AllowAutoRedirect=false});
 var coinalyzeHttp=builder.Services.AddHttpClient<CoinalyzeClient>(client=>{client.BaseAddress=new Uri("https://api.coinalyze.net/v1/");client.Timeout=TimeSpan.FromSeconds(15);});
 builder.Services.AddSingleton<CoinalyzeEngine>(services=>new(services.GetRequiredService<CoinalyzeClient>(),services.GetRequiredService<ILensStore>(),()=>services.GetRequiredService<CoinalyzeConnection>().Key));
 var offlineFixture = builder.Environment.IsEnvironment("Testing") && builder.Configuration.GetValue<bool>("OfflineFixture");
 var okxHttp = builder.Services.AddHttpClient<OkxClient>(client => { client.BaseAddress = new Uri(builder.Configuration["Okx:RestUrl"] ?? "https://www.okx.com/"); client.Timeout = TimeSpan.FromSeconds(8); });
 if (offlineFixture)
 {
+    builder.Services.AddSingleton<OfflineNarrativeHandler>();
+    qianwenHttp.ConfigurePrimaryHttpMessageHandler(services=>services.GetRequiredService<OfflineNarrativeHandler>());
     builder.Services.AddSingleton<OfflineCoinalyzeHandler>();
     coinalyzeHttp.ConfigurePrimaryHttpMessageHandler(services=>services.GetRequiredService<OfflineCoinalyzeHandler>());
     builder.Services.AddSingleton<OfflineHistoryHandler>();
@@ -43,6 +49,7 @@ if (!offlineFixture)
     builder.Services.AddHostedService<BinanceFlowWorker>();
     builder.Services.AddHostedService<PriceContextWorker>();
     builder.Services.AddHostedService<CoinalyzeWorker>();
+    builder.Services.AddHostedService<StudyLifecycleWorker>();
 }
 
 var app = builder.Build();
@@ -79,6 +86,7 @@ app.MapRazorComponents<App>()
 // Deterministic browser fixtures are available only in an explicitly isolated test host.
 if (offlineFixture)
 {
+    app.MapPost("/test/study-quote/{price:decimal}",async(decimal price,MarketEngine market)=>{await market.SwitchModeAsync("live");await market.RefreshLiveAsync(default);await market.AcceptLiveQuoteAsync(new(price,DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),"isolated fixture"),default);return Results.Ok();});
     app.MapGet("/test/coinalyze-stats",(OfflineCoinalyzeHandler handler,ILensStore store)=>Results.Ok(new {handler.Requests,
         protectedKey=store.GetSetting("coinalyze:key") is {} value && value.Length>0 && value!=OfflineCoinalyzeHandler.Key,
         snapshotContainsKey=(store.GetSetting("coinalyze:snapshot")??"").Contains(OfflineCoinalyzeHandler.Key)}));
@@ -96,7 +104,7 @@ if (offlineFixture)
             flow.Begin(new(BtcLens.Core.FlowRules.Perpetual,.1m,.01m,"BTC"),start,exchange);
             foreach(var instrument in BtcLens.Core.FlowRules.Instruments)
             {
-                var baseId=start*10;
+                var baseId=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()*1000+Random.Shared.Next(0,900);
                 for(var n=0;n<31;n++)
                 {
                     var time=start+n*15_000;

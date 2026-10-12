@@ -46,16 +46,18 @@ public sealed class CoinalyzeClient(HttpClient http)
     public async Task<ProviderMarket[]> Markets(string key,CancellationToken ct)
     {
         var result=new List<ProviderMarket>();
+        using var exchanges=await Get("exchanges",key,1,ct);
+        var names=exchanges.RootElement.EnumerateArray().ToDictionary(e=>Text(e,"code"),e=>Text(e,"name"));
         using(var spot=await Get("spot-markets",key,1,ct))
         foreach(var m in spot.RootElement.EnumerateArray())
             if(Text(m,"base_asset")=="BTC" && Quotes.Contains(Text(m,"quote_asset")) && Flag(m,"has_buy_sell_data"))
-                result.Add(new(Text(m,"symbol"),Text(m,"exchange"),FlowRules.Spot,Text(m,"quote_asset"),"BTC"));
+                result.Add(new(Text(m,"symbol"),names.GetValueOrDefault(Text(m,"exchange"),"交易所 "+Text(m,"exchange")),FlowRules.Spot,Text(m,"quote_asset"),"BTC"){ExchangeCode=Text(m,"exchange")});
         using(var futures=await Get("future-markets",key,1,ct))
         foreach(var m in futures.RootElement.EnumerateArray())
             if(Text(m,"base_asset")=="BTC" && Quotes.Contains(Text(m,"quote_asset")) && Flag(m,"is_perpetual") &&
                 Text(m,"margined")=="STABLE" && Text(m,"oi_lq_vol_denominated_in")=="BASE_ASSET" &&
                 Flag(m,"has_buy_sell_data") && Flag(m,"has_ohlcv_data"))
-                result.Add(new(Text(m,"symbol"),Text(m,"exchange"),FlowRules.Perpetual,Text(m,"quote_asset"),"BTC"));
+                result.Add(new(Text(m,"symbol"),names.GetValueOrDefault(Text(m,"exchange"),"交易所 "+Text(m,"exchange")),FlowRules.Perpetual,Text(m,"quote_asset"),"BTC"){ExchangeCode=Text(m,"exchange")});
         if(result.Any(m=>string.IsNullOrWhiteSpace(m.Symbol) || string.IsNullOrWhiteSpace(m.Exchange)) || result.Select(m=>m.Symbol).Distinct().Count()!=result.Count)
             throw new InvalidDataException("Coinalyze 市场元数据不完整或重复。");
         if(!result.Any(m=>m.Instrument==FlowRules.Spot) || !result.Any(m=>m.Instrument==FlowRules.Perpetual))
@@ -104,8 +106,21 @@ public sealed class CoinalyzeClient(HttpClient http)
             !selected.Any(m=>m.Instrument==FlowRules.Perpetual) || selected.Any(m=>m.VolumeUnit!="BTC") || cost>28)
             throw new ArgumentException("请各选择至少一个现货和永续市场；每次刷新最多 28 个额度（現货 1、永续 2）。");
     }
-    public static string[] DefaultSelection(ProviderMarket[] markets) => FlowRules.Instruments.SelectMany(i=>markets.Where(m=>m.Instrument==i)
-        .GroupBy(m=>m.Exchange).Select(g=>g.OrderBy(m=>Array.IndexOf(Quotes,m.Quote)).First()).Take(6)).Select(m=>m.Symbol).ToArray();
+    public static string[] DefaultSelection(ProviderMarket[] markets) => FlowRules.Instruments.SelectMany(instrument=>
+    {
+        // Metadata support is not a promise of minute history. Start with the liquid
+        // venues checked during integration; all other supported venues remain selectable.
+        var candidates=markets.Where(m=>m.Instrument==instrument).GroupBy(m=>m.Exchange)
+            .Select(g=>g.OrderBy(QuoteRank).First()).ToArray();
+        var preferred=candidates.Where(m=>ExchangeRank(m.Exchange,instrument)<99).OrderBy(m=>ExchangeRank(m.Exchange,instrument)).ToArray();
+        return preferred.Length>0?preferred:candidates.OrderBy(m=>m.Exchange).Take(6).ToArray();
+    }).Select(m=>m.Symbol).ToArray();
+    private static int ExchangeRank(string name,string instrument)
+    {
+        var names=instrument==FlowRules.Spot?new[]{"Binance","Coinbase","Bybit","Kraken","Bitfinex"}:new[]{"Binance","OKX","Bybit"};
+        var i=Array.FindIndex(names,n=>name.Equals(n,StringComparison.OrdinalIgnoreCase));return i<0?99:i;
+    }
+    private static int QuoteRank(ProviderMarket m)=>m.Instrument==FlowRules.Spot && new[]{"Coinbase","Kraken","Bitfinex"}.Any(n=>m.Exchange.Contains(n,StringComparison.OrdinalIgnoreCase)) && m.Quote=="USD"?-1:Array.IndexOf(Quotes,m.Quote);
     private static readonly string[] Quotes=["USDT","USD","USDC"];
     private static string Query(string path,ProviderMarket[] markets,long start,long end) => path+"?symbols="+Uri.EscapeDataString(string.Join(",",markets.Select(m=>m.Symbol)))+
         $"&interval=1min&from={start/1000}&to={end/1000-60}";

@@ -6,7 +6,7 @@
 
 BTC Lens combines a BTC market radar, chart drawings, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data.
 
-**当前 V0.2.5**：行情解读把 OB/FVG、关注区、价格反应、现货 / 合约 CVD 和 OI 放在同一窗口比较，输出支持、冲突和后续观察条件。可在「数据连接」填写免费 Coinalyze Key，接入所选多交易所历史买卖量与线性永续 OI。此前的动态趋势线、公共订单流和历史成交量选区继续保留。
+**当前 V0.3.0**：新增带来源的个人规则卡、参数版本、人工目标与失效路线；行情解释接入千问 AI 平台，引用冻结快照中的证据并可定位到图上。订单流默认采用四个独立指标窗格：OKX 永续单市场 CVD、聚合现货 CVD、聚合合约 CVD 和 OI，支持指标 K 线、折线与可选 Delta。Coinalyze 历史数据和既有图表工具继续保留。
 
 ![行情雷达与多个成交量选区：离线测试截图](docs/screenshots/radar.png)
 
@@ -27,7 +27,9 @@ dotnet run --project src/BtcLens.Web
 
 打开 **http://127.0.0.1:5080**。自动连接 OKX 实时公共行情，不再提供演示模式入口。
 
-可选：在 [Coinalyze 账户](https://coinalyze.net/account/api-key/) 领取免费 Key，在本地 `/settings` 验证并保存。Key 通过服务端请求头发送，加密保存在本机，不回显、不导出到报告。也支持本机 `Coinalyze__ApiKey` 环境配置。已配置但数据不可用时，行情解读明确暂停订单流确认，不悄悄替换来源。真实 Coinalyze 连接需用户提供 Key；隔离测试通过不代表已完成真实账户联调。
+可选：在 [Coinalyze 账户](https://coinalyze.net/account/api-key/) 领取免费 Key，在本地 `/settings` 验证并保存。Key 通过服务端请求头发送，加密保存在本机，不回显、不导出到报告。也支持本机 `Coinalyze__ApiKey` 环境配置。已配置但数据不可用时，行情解读明确暂停订单流确认，不悄悄替换来源。
+
+AI 解释可在同一页配置 [千问 AI 平台](https://platform.qianwenai.com/docs/developer-guides/getting-started/introduction) Key。默认模型 `qwen3.8-max`，也可选择 `qwen3.8-max-0902`、`deepseek-v4-pro-0813`、`qwen3.5-omni-plus`。只在点击解释按钮时请求模型，输入限于当前行情、参考证据和个人规则，不上传交易手记。环境配置为 `Qianwen__ApiKey`。
 
 也可以运行：
 
@@ -53,6 +55,7 @@ dotnet run --project src/BtcLens.Web
 10. **VWAP**：当前日/周/月的已收盘 5m HLC3 加权近似，支持 UTC / UTC+8 重置；历史分页、覆盖状态、缺口与图层开关。
 11. **行情解读**：15m / 1h 的完整收盘窗口，价格变化、主动买卖差及原生 BTC OI 变化；结合日线/4H 收盘背景、附近 OB/FVG/关注区、参考局部回收和 N2 结构破位。点击生成后冻结本次解读，可导出 JSON。
 12. **Coinalyze**：免费 Key、市场选择、90 秒历史刷新、按所选市场共同分钟整理 CVD 与 OI；未知单位、币本位和交割合约不混合。详见 [订单流口径](docs/ORDER_FLOW.md) 和 [行情解读规则](docs/MARKET_READING.md)。
+13. **个人规则与 AI**：Lecture 34/1/10 的来源卡、个人复核和备注、参数版本；目标选择时间、消费/失效与旧路线终止。模型解释保存所用规则版本和窗口，检查引用 ID，支持图上定位。规则卡为笔记草稿，尚不等于经过验证的个人 setup。
 
 ![历史 V0.2.1 成交量选区与 VWAP：合成演示](docs/screenshots/price-context.png)
 

@@ -42,6 +42,12 @@ public static class FlowRules
         var point = new CvdPoint(segment.Id + ":" + minute, segment.Id, trade.Instrument, minute,
             trade.Timestamp, next.CvdBtc, (same ? previous!.BuyBtc : 0) + buy, (same ? previous!.SellBtc : 0) + sell,
             (same ? previous!.Messages : 0) + 1) { Exchange = trade.Exchange, CvdUsdt = next.BuyUsdt - next.SellUsdt,
+            OpenBtc=same?previous!.OpenBtc:segment.CvdBtc,
+            HighBtc=same?previous!.HighBtc is {} high?Math.Max(high,next.CvdBtc):null:Math.Max(segment.CvdBtc,next.CvdBtc),
+            LowBtc=same?previous!.LowBtc is {} low?Math.Min(low,next.CvdBtc):null:Math.Min(segment.CvdBtc,next.CvdBtc),
+            OpenUsdt=same?previous!.OpenUsdt:segment.BuyUsdt-segment.SellUsdt,
+            HighUsdt=same?previous!.HighUsdt is {} hu?Math.Max(hu,next.BuyUsdt!.Value-next.SellUsdt!.Value):null:segment.BuyUsdt is {} bu && segment.SellUsdt is {} su?Math.Max(bu-su,next.BuyUsdt!.Value-next.SellUsdt!.Value):null,
+            LowUsdt=same?previous!.LowUsdt is {} lu?Math.Min(lu,next.BuyUsdt!.Value-next.SellUsdt!.Value):null:segment.BuyUsdt is {} blu && segment.SellUsdt is {} slu?Math.Min(blu-slu,next.BuyUsdt!.Value-next.SellUsdt!.Value):null,
             BuyUsdt = (same ? previous!.BuyUsdt ?? 0 : 0) + (buy > 0 ? notional : 0), SellUsdt = (same ? previous!.SellUsdt ?? 0 : 0) + (sell > 0 ? notional : 0) };
         return new(next, point, new CapturedTrade(TradeKey(trade),
             segment.Id, receivedAt, qty, trade));
@@ -77,6 +83,12 @@ public sealed record CvdPoint(string Id, string SegmentId, string Instrument, lo
     public decimal? CvdUsdt { get; init; }
     public decimal? BuyUsdt { get; init; }
     public decimal? SellUsdt { get; init; }
+    public decimal? OpenBtc {get;init;}
+    public decimal? HighBtc {get;init;}
+    public decimal? LowBtc {get;init;}
+    public decimal? OpenUsdt {get;init;}
+    public decimal? HighUsdt {get;init;}
+    public decimal? LowUsdt {get;init;}
 }
 public sealed record FlowUpdate(FlowSegment Segment, CvdPoint Point, CapturedTrade Trade);
 public sealed record FlowCapture(FlowSegment Segment, CapturedTrade[] Trades);

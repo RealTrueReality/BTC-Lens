@@ -40,7 +40,10 @@ public sealed class CoinalyzeEngine
         try
         {
             if(string.IsNullOrWhiteSpace(requestedKey)){if(view.Configured)Disconnect();return;}
-            var markets=view.Available.Length>0?view.Available:await client.Markets(requestedKey,ct);
+            var legacy=view.Available.Length>0 && view.Available.Any(m=>m.ExchangeCode is null);
+            var previousDefault=legacy && view.Selected.Order().SequenceEqual(CoinalyzeClient.DefaultSelection(view.Available).Order());
+            var markets=view.Available.Length>0 && !legacy?view.Available:await client.Markets(requestedKey,ct);
+            if(previousDefault){selectedSetting=JsonCodec.Write(CoinalyzeClient.DefaultSelection(markets));store.SetSetting("coinalyze:selected",selectedSetting);}
             var selected=string.IsNullOrWhiteSpace(selectedSetting)?CoinalyzeClient.DefaultSelection(markets):JsonCodec.Read<string[]>(selectedSetting);
             var chosen=markets.Where(m=>selected.Contains(m.Symbol)).ToArray();
             if(chosen.Length!=selected.Length)throw new InvalidDataException("所选 Coinalyze 市场不再可用，请重新选择。");

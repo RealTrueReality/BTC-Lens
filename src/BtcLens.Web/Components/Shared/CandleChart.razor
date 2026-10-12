@@ -18,6 +18,7 @@
     [Parameter] public EventCallback<ChartObjectSelection> ObjectDeleted { get; set; }
     [Parameter] public EventCallback<DrawingChange> ObjectChanged { get; set; }
     [Parameter] public EventCallback ToolCancelled { get; set; }
+    [Parameter] public ChartEvidence? EvidenceFocus {get;set;}
     private ElementReference host;
     private IJSObjectReference? module;
     private IJSObjectReference? chart;
@@ -48,7 +49,8 @@
                 Profiles.Select(p => new { id = p.Id, label = p.Name, start = p.Result.Start / 1000, end = p.Result.End / 1000,
                     p.Result.Rows, p.Result.Poc, p.Result.Vah, p.Result.Val, p.Result.PocRow, p.Result.VaLowRow, p.Result.VaHighRow }), ChartVwapData(),
                 Drawings.Select(d => new { id = d.Id, revision = d.Revision, drawingKind = d.Kind.ToString(), label = d.Name,
-                    start = d.Start / 1000, end = d.End / 1000, price1 = d.Price1, price2 = d.Price2 }), Selection, Scope);
+                    start = d.Start / 1000, end = d.End / 1000, price1 = d.Price1, price2 = d.Price2 }), Selection, Scope,
+                EvidenceFocus is {} e?new {id=e.Id,label="分析证据 · "+e.Label+" · "+LensFormat.Time(e.KnownAt),start=e.Start/1000,end=e.KnownAt/1000,lower=e.Lower,upper=e.Upper}:null);
             if (pendingFocus is { } focus && await chart.InvokeAsync<bool>("focus", focus.Kind, focus.Id)) pendingFocus = null;
         }
         catch (JSDisconnectedException) { }

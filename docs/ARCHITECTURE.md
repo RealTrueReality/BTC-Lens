@@ -1,5 +1,13 @@
 # 架构与数据模型
 
+## V0.3.0 分析与显示
+
+`StudyRules` 定义来源卡和参数，`StudyWorkflow` 将冻结的 `MarketReading`、规则版本及人工路线构成六步 `StudySnapshot`。`StudyStore` 在 settings 保存版本历史、分析记录和每条路线的终止证据；`StudyLifecycleWorker` 只观察生产报价并保留目标消费 / 失效状态，不调用模型。新分析不改写旧快照。
+
+`QianwenClient` 是固定地址的 typed HttpClient；`ModelConnection` 使用独立 Data Protection purpose 加密 Key。用户手动请求模型解释，服务端校验结构、引用及快照 ID；页面取消旧请求并拒绝覆盖新快照。离线模型传输只在 Testing + OfflineFixture 注册。
+
+`FlowCandles` 区分逐笔观测 OHLC 与分钟路径采样 OHLC。`order-flow.js` 展示单市场 CVD、聚合现货 / 合约 CVD、OI 四个指标窗格，未知极值不会用假影线替代。分析证据通过临时 chart overlay 定位，不写入绘图表或自动区域生命周期。
+
 固定范围历史加载由 `ProfileHistoryLoader` 独立处理。SQLite `candle_cache` 的作用域与开盘时间联合索引用于读取指定区间；按缺失区间分页，逐页持久化，取消后继续复用缓存。网络请求与成交量计算不占用实时价格更新锁，保存前重新检查作用域与取消状态。Testing + OfflineFixture 使用隔离 HTTP 传输且不启动网络采集后台服务。
 
 ~~~mermaid

@@ -45,7 +45,7 @@
             @foreach (var p in ChartProfiles) { <button @onclick='() => SelectAndFocus(new("profile", p.Id))'>@p.Name<small>成交量分布 · @LensFormat.Time(p.Result.Start)</small></button> }
             @foreach (var w in watches.Where(w => w.Enabled)) { <button @onclick='() => SelectAndFocus(new("watch", w.Id))'>@w.Current.Name<small>关注 · @WatchRange(w.Current)</small></button> }
         </div> }
-        <CandleChart @ref="candleChart" Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Tool="@tool" Scope="@view.Scope" TimeRangeSelected="RangePicked" Profiles="ChartProfiles" Drawings="drawings" Selection="selection" ObjectSelected="SelectObject" ObjectChanged="SaveChartObject" ObjectDeleted="DeleteObject" ToolCancelled='() => SetTool("select")' Vwaps="ChartVwaps" />
+        <CandleChart @ref="candleChart" Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Tool="@tool" Scope="@view.Scope" TimeRangeSelected="RangePicked" Profiles="ChartProfiles" Drawings="drawings" Selection="selection" ObjectSelected="SelectObject" ObjectChanged="SaveChartObject" ObjectDeleted="DeleteObject" ToolCancelled='() => SetTool("select")' Vwaps="ChartVwaps" EvidenceFocus="focusedEvidence" />
         <div class="chart-caption"><span>点击图上区域或标签选择 · 拖动所选绘图调整 · Delete 删除</span><span>UTC+8 · OB / FVG 仅显示未回访区域</span></div>
     </section>
     <section class="panel watch-panel"><div class="panel-heading"><h2>我的关注区 <span class="count-badge">@watches.Length</span></h2><button class="icon-button" aria-label="新增关注区" @onclick="NewWatch">＋</button></div>
@@ -64,7 +64,7 @@
 </div>
 <PriceContextPanel @ref="contextPanel" View="view" SelectedId="@selectedProfileId" SelectedChanged="SelectProfile" LocateRequested="FocusProfile" DrawRange="ToggleRangeDrawing" LevelPicked="FromPriceReference" Timeframe="@timeframe" />
 <OrderFlowPanel Flow="view.Flow" Provider="view.ProviderFlow" Candles="CurrentCandles" />
-<MarketReadingPanel View="view" Watches="watches" />
+<MarketReadingPanel View="view" Watches="watches" EvidenceLocated="FocusStudyEvidence" />
 <div class="lower-grid single-column">
     <section class="panel"><div class="panel-heading"><h2>观察记录</h2><span class="subtle-label">证据随事件保存</span></div><div class="event-list">
         @foreach (var a in alerts.Take(4)) { <button class="event-row" @onclick="() => selectedAlert = a"><span class="event-icon">↳</span><span><b>@a.Zone.Name</b><small>@LensFormat.Time(a.CreatedAt) · 观测价 <span class="mono">@LensFormat.Price(a.Price)</span></small></span><span class="push-right muted">查看 →</span></button> }
@@ -111,6 +111,7 @@
     private ChartObjectSelection? selection;
     private ChartDrawing[] drawings = [];
     private CandleChart? candleChart;
+    private ChartEvidence? focusedEvidence;
     private Candle[] CurrentCandles => PriceContextRules.DisplayBars((timeframe == "5m" ? view.ContextCandles : [])
         .Concat(ChartProfiles.OrderBy(p => p.CreatedAt).SelectMany(p => p.SourceBars)), timeframe, view.Cutoff)
         .Concat(view.Candles.GetValueOrDefault(timeframe) ?? []).GroupBy(c => c.OpenTime).Select(g => g.Last()).OrderBy(c => c.OpenTime).ToArray();
@@ -222,6 +223,7 @@
         catch (ArgumentException ex) { formError = ex.Message; }
     }
     private void OpenReport() => report = AnalysisReport.Build(view, watches);
+    private async Task FocusStudyEvidence(ChartEvidence evidence){timeframe=evidence.Timeframe;focusedEvidence=evidence;if(candleChart is not null)await candleChart.FocusAsync("evidence",evidence.Id);await using var ui=await JS.InvokeAsync<IJSObjectReference>("import","./js/ui.js");await ui.InvokeVoidAsync("scrollTo",".chart-panel");}
     private static string Pretty(string value) { using var doc = System.Text.Json.JsonDocument.Parse(value); return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }); }
     private async Task Download(string name, string json) { await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/files.js"); await module.InvokeVoidAsync("download", name, Pretty(json)); }
     private Task ExportAlert() => Download("btclens-event.json", JsonCodec.Write(selectedAlert));

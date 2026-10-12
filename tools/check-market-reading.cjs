@@ -19,7 +19,7 @@ const base=process.env.BTC_LENS_URL||'http://127.0.0.1:5081';
   assert.match(await page.locator('.flow-caption').innerText(),/Coinalyze/);assert.equal(await page.locator('.flow-chart').getAttribute('data-panes'),'4');
   await panel.getByRole('button',{name:'分析当前行情',exact:true}).click();await panel.locator('.reading-summary').waitFor();assert.match(await panel.innerText(),/Coinalyze/);
   const downloading=page.waitForEvent('download');await panel.getByRole('button',{name:'导出这次分析 ↗',exact:true}).click();const download=await downloading;await download.saveAs('test-results/market-reading/reading.json');
-  const json=fs.readFileSync('test-results/market-reading/reading.json','utf8');assert.doesNotMatch(json,/offline-coinalyze-test-key/);assert.equal(JSON.parse(json).window.source,'Coinalyze');
+  const json=fs.readFileSync('test-results/market-reading/reading.json','utf8');assert.doesNotMatch(json,/offline-coinalyze-test-key/);assert.equal(JSON.parse(json).reading.window.source,'Coinalyze');
   await page.getByLabel('订单流数据源',{exact:true}).selectOption('public');await page.getByLabel('订单流交易所',{exact:true}).waitFor();
   await page.getByLabel('订单流数据源',{exact:true}).selectOption('auto');await page.waitForFunction(()=>Number(document.querySelector('.flow-chart')?.dataset.cvdPoints)>100);
   await page.screenshot({path:'test-results/market-reading/coinalyze-reading.png',fullPage:true});checks.push('Coinalyze history / four panes / provider selection / frozen analysis export');

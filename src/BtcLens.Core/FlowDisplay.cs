@@ -3,6 +3,9 @@ namespace BtcLens.Core;
 public sealed record FlowDisplayPoint(string SegmentId,string Instrument,long Timestamp,decimal Cvd,decimal Delta)
 {
     public decimal Volume { get; init; }
+    public decimal? Open {get;init;}
+    public decimal? High {get;init;}
+    public decimal? Low {get;init;}
 }
 public sealed record FlowDisplayResult(FlowDisplayPoint[] Points,string[] Exchanges,long RequestedStart,long? ActualStart,long KnownAt,int MissingMinutes,string Unit);
 public static class FlowDisplay
@@ -17,7 +20,9 @@ public static class FlowDisplay
         var end=flow.AsOf/60_000*60_000;
         if(end<start || end-start>86_400_000)throw new ArgumentException("Flow display supports the observed last 24 hours.");
         var segments=flow.Segments.ToDictionary(s=>s.Id);
-        var rows=flow.Points.Where(p=>selected.Contains(p.Exchange) && p.Minute>=start && p.Minute<end).GroupBy(p=>(p.Exchange,p.Instrument,p.Minute))
+        var rows=flow.Points.Where(p=>selected.Contains(p.Exchange) && p.Minute>=start && p.Minute<end)
+            .Where(p=>!segments.TryGetValue(p.SegmentId,out var s) || s.StartedAt<=p.Minute && s.LastTradeAt>=p.Minute+60_000 && (s.EndedAt is null || s.EndedAt>=p.Minute+60_000))
+            .GroupBy(p=>(p.Exchange,p.Instrument,p.Minute))
             .ToDictionary(g=>g.Key,g=>g.ToArray());
         var result=new List<FlowDisplayPoint>();long? actual=null;var missing=0;
         foreach(var instrument in FlowRules.Instruments)
@@ -41,7 +46,10 @@ public static class FlowDisplay
                 if(previous!=minute-60_000 || signature!=priorSignature)
                 { cvd=0;group=instrument+":"+unit+":"+signature+":"+minute; }
                 var delta=values.Sum(p=>unit=="BTC"?p.BuyBtc-p.SellBtc:p.BuyUsdt!.Value-p.SellUsdt!.Value);
-                cvd+=delta;result.Add(new(group!,instrument,minute+60_000,cvd,delta) { Volume=values.Sum(p=>unit=="BTC"?p.BuyBtc+p.SellBtc:p.BuyUsdt!.Value+p.SellUsdt!.Value) });
+                cvd+=delta;
+                var one=values.Count==1?values[0]:null;var shift=one is null?0:cvd-(unit=="BTC"?one.CvdBtc:one.CvdUsdt!.Value);
+                result.Add(new(group!,instrument,minute+60_000,cvd,delta) { Volume=values.Sum(p=>unit=="BTC"?p.BuyBtc+p.SellBtc:p.BuyUsdt!.Value+p.SellUsdt!.Value),
+                    Open=(unit=="BTC"?one?.OpenBtc:one?.OpenUsdt)+shift,High=(unit=="BTC"?one?.HighBtc:one?.HighUsdt)+shift,Low=(unit=="BTC"?one?.LowBtc:one?.LowUsdt)+shift });
                 actual=actual is null?minute:Math.Min(actual.Value,minute);previous=minute;priorSignature=signature;
             }
         }

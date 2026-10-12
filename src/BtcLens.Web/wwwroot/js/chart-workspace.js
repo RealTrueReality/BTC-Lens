@@ -1,7 +1,7 @@
 export function create(host, dotnet) {
     host.replaceChildren();
     const L = window.LightweightCharts;
-    let focusBounds = null;
+    let focusBounds = null,evidenceFocus=null;
     const chart = L.createChart(host, {
         autoSize: true,
         layout: { background: { color: '#13191d' }, textColor: '#86939b', fontFamily: 'Segoe UI, sans-serif', fontSize: 11, attributionLogo: true },
@@ -70,6 +70,7 @@ export function create(host, dotnet) {
     const select = obj => { selection = obj ? {kind:obj.kind,id:obj.id} : null; host.focus({preventScroll:true}); primitive.refresh?.(); invoke('Selected', obj?.kind || '', obj?.id || ''); };
     const buildObjects = () => {
         objects = [
+            ...(evidenceFocus?[{...evidenceFocus,kind:'evidence',color:'#f0c76b',extend:false,drawingKind:evidenceFocus.lower===evidenceFocus.upper?'HorizontalLine':null,price1:evidenceFocus.upper,price2:evidenceFocus.lower}]:[]),
             ...zones.map(z => ({...z,kind:'zone',extend:true,color:z.bias === 'Bullish' ? '#59b99e' : '#dd787b'})),
             ...profiles.map(p => ({...p,kind:'profile',color:palette[[...p.id].reduce((n,c)=>n+c.charCodeAt(0),0) % palette.length],lower:p.rows[0]?.lower,upper:p.rows.at(-1)?.upper})),
             ...drawings.map(d => ({...d,kind:'drawing',color:'#91b7db',lower:Math.min(d.price1,d.price2),upper:Math.max(d.price1,d.price2),extend:d.drawingKind === 'HorizontalLine'})),
@@ -236,7 +237,7 @@ export function create(host, dotnet) {
     host.addEventListener('click',pick); host.addEventListener('pointerdown',down,true); host.addEventListener('pointermove',move,true);
     host.addEventListener('pointerup',up,true); host.addEventListener('pointercancel',abortPointer); document.addEventListener('keydown',keys);
     return {
-        update(nextCandles,nextZones,nextWatches,levels,nextTool,reset,nextProfiles,vwaps,nextDrawings,nextSelection,nextScope) {
+        update(nextCandles,nextZones,nextWatches,levels,nextTool,reset,nextProfiles,vwaps,nextDrawings,nextSelection,nextScope,nextEvidence=null) {
             const range=initialized&&!reset?chart.timeScale().getVisibleLogicalRange():null;
             const oldTimes=times;
             let shift=0;
@@ -245,7 +246,7 @@ export function create(host, dotnet) {
                 const target=nextCandles.findIndex(c=>c.time===oldTimes[anchor]);
                 if(target>=0)shift=target-anchor;
             }
-            candles=nextCandles;times=candles.map(c=>c.time);zones=nextZones;watches=nextWatches;profiles=nextProfiles||[];drawings=nextDrawings||[];
+            candles=nextCandles;times=candles.map(c=>c.time);zones=nextZones;watches=nextWatches;profiles=nextProfiles||[];drawings=nextDrawings||[];evidenceFocus=nextEvidence;
             if(reset || tool!==nextTool) {first=preview=drag=null;focusBounds=null;}
             tool=nextTool;selection=nextSelection;scope=nextScope;buildObjects();setInteraction();
             series.setData(candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
@@ -259,6 +260,7 @@ export function create(host, dotnet) {
             host.dataset.vwapSeries=String(vwapSeries.length);host.dataset.profileId=profiles[0]?.id||'';
             if(range)chart.timeScale().setVisibleLogicalRange({from:range.from+shift,to:range.to+shift});else if(candles.length)chart.timeScale().setVisibleLogicalRange({from:Math.max(0,candles.length-115),to:candles.length+12});
             initialized=true;primitive.refresh?.();scheduleLabels();
+            host.dataset.evidenceId=evidenceFocus?.id||'';
         },
         focus(kind,id) {
             const obj=objects.find(o=>o.kind===kind&&o.id===id);if(!obj)return false; focusBounds={lower:obj.lower,upper:obj.upper};

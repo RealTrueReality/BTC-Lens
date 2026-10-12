@@ -16,8 +16,9 @@
             <NavLink href="/statistics"><span class="nav-icon">▥</span>复盘统计<span class="nav-end">03</span></NavLink>
             <NavLink href="/guide"><span class="nav-icon">◇</span>规则与数据<span class="nav-end">04</span></NavLink>
             <NavLink href="/settings"><span class="nav-icon">⚙</span>数据连接<span class="nav-end">05</span></NavLink>
+            <NavLink href="/playbook"><span class="nav-icon">◈</span>我的看盘规则<span class="nav-end">06</span></NavLink>
         </nav>
-        <div class="sidebar-bottom"><span class="status-dot"></span>本地个人工作区<span class="version">v0.2.5</span></div>
+        <div class="sidebar-bottom"><span class="status-dot"></span>本地个人工作区<span class="version">v0.3.0</span></div>
     </aside>
     <div class="workspace">
         <header class="topbar">
@@ -30,7 +31,7 @@
 </div>
 <div id="blazor-error-ui" data-nosnippet>连接出现异常，请重新加载。<a href="." class="reload">重新加载</a><span class="dismiss">×</span></div>
 @code {
-    private string PageName => Navigation.Uri.Contains("journal") ? "交易手记" : Navigation.Uri.Contains("statistics") ? "复盘统计" : Navigation.Uri.Contains("guide") ? "规则与数据" : Navigation.Uri.Contains("settings")?"数据连接":"行情雷达";
+    private string PageName => Navigation.Uri.Contains("journal") ? "交易手记" : Navigation.Uri.Contains("statistics") ? "复盘统计" : Navigation.Uri.Contains("guide") ? "规则与数据" : Navigation.Uri.Contains("settings")?"数据连接":Navigation.Uri.Contains("playbook")?"我的看盘规则":"行情雷达";
     protected override void OnInitialized() { Market.Changed += Update; Navigation.LocationChanged += LocationChanged; }
     private void Update() => _ = InvokeAsync(StateHasChanged);
     private void LocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => Update();

@@ -12,6 +12,7 @@
         <div class="flow-metric"><span class="metric-label">永续 OI <small>@(UseProvider?"Coinalyze 所选线性永续":"OKX BTC-USDT-SWAP")</small></span><strong class="mono">@(LatestOi?.CoinBtc.ToString("N2") ?? "—") <small>BTC</small></strong><span class="flow-status">@(UseProvider?Provider.Status:LatestOi is null ? "等待 OI" : Flow.Mode == "demo" ? "合成持仓量" : Now - LatestOi.Timestamp > 30_000 ? "样本已过期" : "REST · 10 秒采样")</span><small>@(UseProvider?"原生 BTC OI · 共同收盘分钟":LatestOi is null ? "张数 / USD：—" : $"{LatestOi.Contracts:N2} 张 / {LatestOi.Usd:N0} USD")</small><small>样本时间：@(LatestOi is null ? "—" : LensFormat.Time(LatestOi.Timestamp))</small></div>
     </div>
     @if(UseProvider && (Provider.Error is not null || !Provider.Fresh(Now))){<div class="flow-error">@(Provider.Error??"Coinalyze 数据等待更新")；曲线保留已获取历史，行情解读暂停订单流确认。</div>}
+    @if(UseProvider && Provider.FetchedAt>0 && EmptyProviderMarkets.Length>0){<div class="flow-error">所选市场未返回历史：@string.Join(" / ",EmptyProviderMarkets)。对应聚合不能完整显示；可在「数据连接」调整市场。程序不会静默移除来源或填零。</div>}
     @if (!UseProvider && Flow.Error is not null && Flow.Mode == "live") { <div class="flow-error">@Flow.Error；不同段从零重新累计。</div> }
     @if (!UseProvider && Flow.OiError is not null && Flow.Mode == "live") { <div class="flow-error">@Flow.OiError</div> }
     @if(UseProvider){<div class="flow-source-status"><span>现货：@string.Join(" / ",ProviderDisplay.SpotSources)</span><span>永续：@string.Join(" / ",ProviderDisplay.PerpetualSources)</span></div>}
@@ -19,8 +20,10 @@
     <div class="flow-source-status">@foreach (var exchange in SelectedExchanges) { @foreach(var market in FlowRules.Instruments) { <span>@exchange @(market == FlowRules.Spot ? "现货" : "永续") · @SegmentStatus(Flow.Latest(market,exchange))</span> } }</div>
     @foreach (var item in Flow.SourceErrors.Where(x=>SelectedExchanges.Any(e=>x.Key.StartsWith(e+":")))) { <div class="flow-error">@item.Key · @item.Value</div> }
     }
-    <div class="flow-chart-labels"><span>价格 · USDT</span><span><i class="legend-dot green"></i>现货 CVD + Delta · @EffectiveUnit</span><span><i class="legend-dot amber"></i>永续 CVD + Delta · @EffectiveUnit</span><span><i class="legend-dot blue"></i>永续 OI · BTC</span></div>
+    <div class="indicator-controls"><label>图形<select aria-label="订单流图形" @bind="graphStyle"><option value="candles">指标 K 线</option><option value="line">指标折线</option><option value="price">价格联动</option></select></label><label><input type="checkbox" @bind="showDelta" />Delta 柱</label><span class="muted">第一栏：OKX 永续单市场 CVD · 后三栏：聚合现货 / 聚合合约 / OI</span></div>
+    <div class="flow-chart-labels"><span>OKX 永续 CVD · @EffectiveUnit</span><span><i class="legend-dot green"></i>聚合现货 CVD · @EffectiveUnit</span><span><i class="legend-dot amber"></i>聚合合约 CVD · @EffectiveUnit</span><span><i class="legend-dot blue"></i>OI · BTC</span></div>
     <div class="flow-chart" @ref="host"><div class="chart-loading">正在绘制订单流…</div></div>
+    @if(graphStyle=="candles"){<p class="flow-note">OKX 单市场新采集数据保留观测成交的 CVD 开高低收；旧数据和多市场汇总按分钟收盘采样构成 5m / 15m K 线，不能还原分钟内极值。OI 为采样 K 线。1m 汇总没有可靠高低点时显示折线，不伪造影线；缺口与重连保持分段。</p>}
     @if(UseProvider){<div class="flow-caption">时间 UTC+8 · Coinalyze · 所选市场共同分钟从零累计 · 最新获取 @LensFormat.Time(Provider.FetchedAt)。缺少任一所选市场的分钟会断开并重新累计；当前分钟尚未计入。</div><p class="flow-note">数据来源 <a href="https://coinalyze.net/" target="_blank" rel="noopener noreferrer">Coinalyze</a> · CVD 根据提供方的总量与主动买量整理为 BTC，不用 K 线涨跌猜测主动方。只包含所选现货与单位可核对的线性永续，当前不包含币本位或交割。不用收盘价换算历史美元成交额。</p>}
     else{
     <div class="flow-caption">时间 UTC+8 · @source · @(displayMode == "aggregate" ? "共同分钟从零累计" : "每个原始采集段独立累计") · @Flow.Points.Length 个本地 CVD 点 / @Flow.OpenInterest.Length 个 OKX OI 样本。汇总只使用已收盘且所选交易所共同覆盖的分钟；当前分钟尚未计入。</div>
@@ -45,6 +48,8 @@
     private string chosenProvider="auto";
     private string providerChoice {get=>chosenProvider;set{chosenProvider=value;if(UseProvider)unit="BTC";}}
     private bool UseProvider=>Provider.Configured && providerChoice=="auto";
+    private string[] EmptyProviderMarkets=>Provider.Available.Where(m=>Provider.Selected.Contains(m.Symbol)).Select(m=>
+        !Provider.Volumes.Any(b=>b.Symbol==m.Symbol)?m.Exchange+" · "+m.Symbol+"（成交量）":m.Instrument==FlowRules.Perpetual && !Provider.OpenInterest.Any(b=>b.Symbol==m.Symbol)?m.Exchange+" · "+m.Symbol+"（OI）":null).OfType<string>().ToArray();
     private string EffectiveUnit=>UseProvider?"BTC":unit;
     private ProviderFlowView? providerCacheSource;private int providerCacheHours;private long providerCacheMinute;private ProviderDisplay? providerCache;
     private ProviderDisplay ProviderDisplay {get {if(providerCacheSource!=Provider || providerCacheHours!=windowHours || providerCacheMinute!=Now/60_000 || providerCache is null){providerCache=ProviderFlow.Build(Provider,Math.Max(0,Now-windowHours*3_600_000L),Now);providerCacheSource=Provider;providerCacheHours=windowHours;providerCacheMinute=Now/60_000;}return providerCache;}}
@@ -68,7 +73,8 @@
     private decimal? DisplayValue(string instrument) => UseProvider || displayMode == "aggregate" ? AggregatePoints.LastOrDefault(p=>p.Instrument==instrument)?.Cvd : null;
     private long? DisplayStart(string instrument) { var points=AggregatePoints.Where(p=>p.Instrument==instrument).ToArray();return points.LastOrDefault() is { } last ? points.First(p=>p.SegmentId==last.SegmentId).Timestamp-60_000 : null; }
     private long? DisplayEnd(string instrument) => UseProvider || displayMode == "aggregate" ? AggregatePoints.LastOrDefault(p=>p.Instrument==instrument)?.Timestamp : SelectedExchanges.Select(e=>Flow.Latest(instrument,e)?.LastTradeAt).Max();
-    private int interval = 1;
+    private int interval = 5;
+    private string graphStyle="candles";private bool showDelta;
     private ElementReference host;
     private IJSObjectReference? module, chart;
     private string identity = "";
@@ -84,22 +90,32 @@
         {
             if (firstRender) { module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/order-flow.js"); chart = await module.InvokeAsync<IJSObjectReference>("create", host); }
             if (chart is null) return;
+            var single=FlowDisplay.Build(Flow,[FlowRules.Okx],Math.Max(0,Flow.AsOf-windowHours*3_600_000L),EffectiveUnit).Points.Where(p=>p.Instrument==FlowRules.Perpetual).ToArray();
+            var indicatorBars=new List<IndicatorCandle>();
+            indicatorBars.AddRange(FlowCandles.Cvd(single,0,interval));
+            var aggregates=AggregatePoints;
+            indicatorBars.AddRange(FlowCandles.Cvd(aggregates.Where(p=>p.Instrument==FlowRules.Spot).ToArray(),1,interval));
+            indicatorBars.AddRange(FlowCandles.Cvd(aggregates.Where(p=>p.Instrument==FlowRules.Perpetual).ToArray(),2,interval));
+            var oiPoints=UseProvider?ProviderDisplay.OpenInterest:Flow.OpenInterest.Where(p=>p.Timestamp>=Math.Max(0,Flow.AsOf-windowHours*3_600_000L)).Select(p=>new FlowOiPoint(p.Timestamp,p.CoinBtc)).ToArray();
+            indicatorBars.AddRange(FlowCandles.Oi(oiPoints,interval,UseProvider?60_000:Flow.Mode=="demo"?300_000:30_000).Where(b=>b.OpenTime+interval*60_000L<=Now));
+            var options=new {style=graphStyle,showDelta,bars=indicatorBars.Select(b=>new {group=b.Group,pane=b.Pane,time=b.OpenTime/1000,knownAt=b.KnownAt/1000,open=b.Open,high=b.High,low=b.Low,close=b.Close,basis=b.Basis}),
+                main=single.Select(p=>new {p.SegmentId,p.Instrument,label="OKX 永续单市场",time=p.Timestamp/1000,value=p.Cvd,delta=p.Delta})};
             if(UseProvider)
             {
-                var pd=ProviderDisplay;var providerIdentity="Coinalyze:"+string.Join("+",Provider.Selected)+":"+interval+":"+windowHours;
+                var pd=ProviderDisplay;var providerIdentity="Coinalyze:"+string.Join("+",Provider.Selected)+":"+interval+":"+windowHours+":"+graphStyle+":"+showDelta;
                 await chart.InvokeVoidAsync("update",pd.Points.Select(p=>new {p.SegmentId,p.Instrument,label="Coinalyze",time=p.Timestamp/1000,value=p.Cvd,delta=p.Delta}),
                     pd.OpenInterest.Select(p=>new {time=p.Timestamp/1000,value=p.Btc}),interval,identity!=providerIdentity,60,
-                    Candles.Where(c=>c.CloseTime>=pd.RequestedStart).Select(c=>new {time=c.OpenTime/1000,open=c.Open,high=c.High,low=c.Low,close=c.Close}),"BTC","Coinalyze");
+                    Candles.Where(c=>c.CloseTime>=pd.RequestedStart).Select(c=>new {time=c.OpenTime/1000,open=c.Open,high=c.High,low=c.Low,close=c.Close}),"BTC","Coinalyze",options);
                 identity=providerIdentity;return;
             }
-            var next = Flow.Mode + ":" + interval + ":" + source + ":" + displayMode + ":" + unit + ":" + windowHours;
+            var next = Flow.Mode + ":" + interval + ":" + source + ":" + displayMode + ":" + unit + ":" + windowHours+":"+graphStyle+":"+showDelta;
             var display=Display;
             var points = displayMode == "aggregate" ? display.Points.Select(p=>new {p.SegmentId,p.Instrument,label=source,time=p.Timestamp/1000,value=p.Cvd,delta=(decimal?)p.Delta}).ToArray() :
                 Flow.Points.Where(p=>SelectedExchanges.Contains(p.Exchange) && p.Timestamp>=display.RequestedStart && (unit=="BTC" || p.CvdUsdt is not null))
                     .Select(p=>new {p.SegmentId,p.Instrument,label=p.Exchange,time=p.Timestamp/1000,value=unit=="BTC"?p.CvdBtc:p.CvdUsdt!.Value,delta=(decimal?)(unit=="BTC"?p.BuyBtc-p.SellBtc:p.BuyUsdt-p.SellUsdt)}).ToArray();
             await chart.InvokeVoidAsync("update", points,
                 Flow.OpenInterest.Where(s=>s.Timestamp>=display.RequestedStart).Select(s => new { time = s.Timestamp / 1000, value = s.CoinBtc }), interval, next != identity, Flow.Mode == "demo" ? 300 : 30,
-                Candles.Where(c=>c.CloseTime>=display.RequestedStart).Select(c=>new {time=c.OpenTime/1000,open=c.Open,high=c.High,low=c.Low,close=c.Close}),unit);
+                Candles.Where(c=>c.CloseTime>=display.RequestedStart).Select(c=>new {time=c.OpenTime/1000,open=c.Open,high=c.High,low=c.Low,close=c.Close}),unit,"OKX",options);
             identity = next;
         }
         catch (JSDisconnectedException) { }

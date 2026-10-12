@@ -2,6 +2,8 @@
 @implements IDisposable
 @inject BtcLens.Web.Services.CoinalyzeConnection Connection
 @inject CoinalyzeEngine Provider
+@inject BtcLens.Web.Services.ModelConnection ModelConnection
+@inject QianwenClient Qianwen
 <PageTitle>数据连接 · BTC Lens</PageTitle>
 <div class="page-heading"><div><div class="eyebrow">DATA CONNECTION</div><h1>数据连接<span class="title-dot">.</span></h1><p>为行情解读补充多交易所历史订单流。</p></div></div>
 <section class="panel connection-panel" data-testid="coinalyze-settings" data-ready="@ready.ToString().ToLowerInvariant()">
@@ -22,12 +24,14 @@
     }
     <p class="flow-note">当前支持 BTC/USD、USDT、USDC 现货，以及原生 OI/成交量单位为 BTC 的稳定币保证金永续。币本位、交割合约及单位无法核对的市场未纳入。多交易所覆盖仍受提供方支持范围和免费历史长度限制。</p>
 </section>
+<section class="panel connection-panel" style="margin-top:20px" data-testid="model-settings"><div class="panel-heading"><h2>千问 AI 平台 · 行情解释</h2><span class="pill">@(ModelConnection.Key is null?"尚未连接":"已保存连接")</span></div><p>使用你选择的模型解释当前行情快照和个人规则。只在点击 AI 解释时发送这次行情数据，不发送交易手记或 API Key。<a href="https://platform.qianwenai.com/docs/developer-guides/getting-started/introduction" target="_blank" rel="noopener noreferrer">平台文档 ↗</a></p><form @onsubmit="SaveModel" @onsubmit:preventDefault><label>千问 API Key<input type="password" autocomplete="new-password" @bind="modelCandidate" @bind:event="oninput" disabled="@modelBusy" placeholder="已保存的 Key 不回显；不换 Key 时可留空" /></label><label>行情解释模型<select aria-label="行情解释模型" @bind="modelName" disabled="@modelBusy">@foreach(var name in QianwenClient.Models){<option>@name</option>}</select></label><div class="modal-actions"><button class="button primary" disabled="@(modelBusy || string.IsNullOrWhiteSpace(modelCandidate) && ModelConnection.Key is null)">@(modelBusy?"正在验证模型…":"验证并保存模型")</button>@if(ModelConnection.Key is not null && !ModelConnection.EnvironmentManaged){<button type="button" class="button ghost" disabled="@modelBusy" @onclick="RemoveModel">移除模型连接</button>}</div></form>@if(modelMessage is not null){<div class="@(modelError?"inline-error":"form-note")" role="status">@modelMessage</div>}<p class="form-note">验证只发送短消息。实际分析显示返回的 Token 数；模型生成需要服务端网络与账户额度。Key 使用本机加密保存。</p></section>
 @code {
     private string candidate="";private bool busy,error,ready;private string? message;
     private ProviderMarket[] markets=[];private HashSet<string> selection=[];
     private readonly CancellationTokenSource lifetime=new();
+    private string modelCandidate="",modelName="qwen3.8-max";private bool modelBusy,modelError;private string? modelMessage;
     private int Cost=>markets.Where(m=>selection.Contains(m.Symbol)).Sum(m=>m.Instrument==FlowRules.Perpetual?2:1);
-    protected override void OnInitialized(){markets=Provider.View.Available;selection=Provider.View.Selected.ToHashSet();}
+    protected override void OnInitialized(){markets=Provider.View.Available;selection=Provider.View.Selected.ToHashSet();modelName=ModelConnection.Model;}
     protected override void OnAfterRender(bool firstRender){if(firstRender){ready=true;StateHasChanged();}}
     private void Toggle(string symbol,bool enabled){if(enabled)selection.Add(symbol);else selection.Remove(symbol);}
     private async Task Connect()
@@ -46,5 +50,7 @@
     }
     private async Task SaveSelection(){busy=true;error=false;try{Provider.Configure(markets,selection.ToArray());await Provider.RefreshAsync(lifetime.Token);message=Provider.View.Error??"已更新分析覆盖市场。";error=Provider.View.Error is not null;}catch(OperationCanceledException)when(lifetime.IsCancellationRequested){}catch(Exception ex){message=ex is ArgumentException?ex.Message:"刷新失败，请稍后重试。";error=true;}finally{busy=false;}}
     private void Disconnect(){Connection.Clear();Provider.Disconnect();candidate="";markets=[];selection=[];message="已移除连接，行情解读使用 OKX + Binance 公共采集。";error=false;}
+    private async Task SaveModel(){modelBusy=true;modelMessage=null;modelError=false;try{var key=string.IsNullOrWhiteSpace(modelCandidate)?ModelConnection.Key!:modelCandidate.Trim();await Qianwen.VerifyAsync(key,modelName,lifetime.Token);ModelConnection.Save(key,modelName);modelCandidate="";modelMessage="模型连接已验证，下一次 AI 解释使用 "+modelName+"。";}catch(OperationCanceledException)when(lifetime.IsCancellationRequested){}catch(Exception ex){modelMessage=ex is InvalidDataException or ArgumentException?ex.Message:"模型连接失败，请检查网络后重试。";modelError=true;}finally{modelBusy=false;}}
+    private void RemoveModel(){ModelConnection.Clear();modelCandidate="";modelMessage="已移除模型连接，规则解读继续可用。";modelError=false;}
     public void Dispose(){lifetime.Cancel();lifetime.Dispose();}
 }

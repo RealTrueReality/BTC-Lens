@@ -1,6 +1,9 @@
 namespace BtcLens.Core;
 
-public sealed record ProviderMarket(string Symbol, string Exchange, string Instrument, string Quote, string VolumeUnit);
+public sealed record ProviderMarket(string Symbol, string Exchange, string Instrument, string Quote, string VolumeUnit)
+{
+    public string? ExchangeCode {get;init;}
+}
 public sealed record ProviderVolumeBar(string Symbol, long OpenTime, decimal Open, decimal High, decimal Low, decimal Close,
     decimal Volume, decimal BuyVolume);
 public sealed record ProviderOiBar(string Symbol, long OpenTime, decimal Close);
