@@ -2,7 +2,9 @@
 
 ## V0.3.0 分析与显示
 
-`StudyRules` 定义来源卡和参数，`StudyWorkflow` 将冻结的 `MarketReading`、规则版本及人工路线构成六步 `StudySnapshot`。`StudyStore` 在 settings 保存版本历史、分析记录和每条路线的终止证据；`StudyLifecycleWorker` 只观察生产报价并保留目标消费 / 失效状态，不调用模型。新分析不改写旧快照。
+V0.3.1 的 `ChartHistoryLoader` 分页读取当前周期的 OKX 原生历史，优先复用 `live:chart:周期` 与已有行情缓存；`MarketEngine` 的历史加载方法在网络请求期间不持有报价更新锁。页面按周期保存已加载历史，作用域切换或页面销毁取消请求；图表向左移动触发补取，新增数据前后保持时间位置。固定范围分布的 5m 分页继续使用独立 `ProfileHistoryLoader`，两者共用 OKX 历史请求节流。
+
+`StudyRules` 定义来源卡和参数，`StudyWorkflow` 将冻结的 `MarketReading`、规则版本及人工路线构成 `StudySnapshot`。V0.3.1 移除独立规则页面和路线后台观察服务，行情页调用 `BuildDefaultStudy`，始终使用默认参数与空人工路线，不加载隐藏的旧设置。`StudyStore` 保留历史版本、旧路线终止证据及分析记录，新分析不改写旧快照。
 
 `QianwenClient` 是固定地址的 typed HttpClient；`ModelConnection` 使用独立 Data Protection purpose 加密 Key。用户手动请求模型解释，服务端校验结构、引用及快照 ID；页面取消旧请求并拒绝覆盖新快照。离线模型传输只在 Testing + OfflineFixture 注册。
 

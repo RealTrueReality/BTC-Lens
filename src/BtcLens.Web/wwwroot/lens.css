@@ -42,6 +42,7 @@
 .flow-record .text-button { text-align: left; padding: 6px 0 0; }
 @media(max-width: 700px) { .flow-metrics { grid-template-columns: 1fr; } .flow-metric { border-right: 0; border-bottom: 1px solid #283238; padding: 14px 18px; } .flow-controls { gap: 8px; } .flow-controls label { font-size: 0; } .flow-chart-labels { font-size: 10px; gap: 5px; } .flow-record-list { grid-template-columns: 1fr; } .flow-records { padding: 16px; } .flow-caption,.flow-note { margin: 12px 16px; } }
 .connection-panel{max-width:1080px}.connection-panel a,.flow-note a{color:var(--accent,#e9ad62)}
+.chart-history-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px 15px;border-top:1px solid var(--border);font-size:11px}.chart-history-bar>span{flex:1;min-width:170px}
 .connection-panel{color-scheme:dark}
 .connection-panel :is(input:not([type=checkbox]):not([type=radio]),select,textarea){display:block;width:100%;min-width:0;min-height:40px;padding:9px 10px;border:1px solid #3c515e;border-radius:5px;background:#111b22;color:var(--text);font-size:12px;transition:border-color .15s,box-shadow .15s}
 .connection-panel :is(input:not([type=checkbox]):not([type=radio]),select,textarea):hover:not(:disabled){border-color:#59717e}

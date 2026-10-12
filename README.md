@@ -6,7 +6,7 @@
 
 BTC Lens combines a BTC market radar, chart drawings, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data.
 
-**当前 V0.3.0**：新增带来源的个人规则卡、参数版本、人工目标与失效路线；行情解释接入千问 AI 平台，引用冻结快照中的证据并可定位到图上。订单流默认采用四个独立指标窗格：OKX 永续单市场 CVD、聚合现货 CVD、聚合合约 CVD 和 OI，支持指标 K 线、折线与可选 Delta。Coinalyze 历史数据和既有图表工具继续保留。
+**当前 V0.3.1**：日常操作简化为图上选关注位置、查看行情分析、记录交易与复盘。移除独立规则填写页面，后台采用默认参考参数；千问 AI 引用说明直接展开，价格区域可定位到图上。主图向左拖动或点击按钮可分页加载更早 K 线，复用本地缓存并保持实时更新。订单流保留 OKX 单市场 CVD、聚合现货 / 合约 CVD 和 OI 四个窗格。
 
 ![行情雷达与多个成交量选区：离线测试截图](docs/screenshots/radar.png)
 
@@ -55,7 +55,7 @@ AI 解释可在同一页配置 [千问 AI 平台](https://platform.qianwenai.com
 10. **VWAP**：当前日/周/月的已收盘 5m HLC3 加权近似，支持 UTC / UTC+8 重置；历史分页、覆盖状态、缺口与图层开关。
 11. **行情解读**：15m / 1h 的完整收盘窗口，价格变化、主动买卖差及原生 BTC OI 变化；结合日线/4H 收盘背景、附近 OB/FVG/关注区、参考局部回收和 N2 结构破位。点击生成后冻结本次解读，可导出 JSON。
 12. **Coinalyze**：免费 Key、市场选择、90 秒历史刷新、按所选市场共同分钟整理 CVD 与 OI；未知单位、币本位和交割合约不混合。详见 [订单流口径](docs/ORDER_FLOW.md) 和 [行情解读规则](docs/MARKET_READING.md)。
-13. **个人规则与 AI**：Lecture 34/1/10 的来源卡、个人复核和备注、参数版本；目标选择时间、消费/失效与旧路线终止。模型解释保存所用规则版本和窗口，检查引用 ID，支持图上定位。规则卡为笔记草稿，尚不等于经过验证的个人 setup。
+13. **AI 行情分析**：结合默认参考原则、图上关注区、价格反应与订单流解释盘面。检查引用 ID，支持图上定位；无需填写规则表或观察路线。课程笔记仍为待核验的参考，尚不等于经过验证的个人 setup。
 
 ![历史 V0.2.1 成交量选区与 VWAP：合成演示](docs/screenshots/price-context.png)
 

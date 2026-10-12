@@ -11,6 +11,7 @@ public sealed class MarketEngine
     private readonly CoinalyzeEngine? coinalyze;
     private readonly TimeProvider clock;
     private readonly ProfileHistoryLoader profileHistory;
+    private readonly ChartHistoryLoader chartHistory;
     private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Candle[] fixture;
@@ -22,10 +23,20 @@ public sealed class MarketEngine
     public MarketView View { get { var state = Volatile.Read(ref view); return state.Mode == "live" ? state with { Flow = orderFlow?.View ?? FlowView.Empty, ProviderFlow=coinalyze?.View??ProviderFlowView.Empty, Cutoff = Now } : state; } }
     public event Action? Changed;
 
+    public async Task<ChartHistoryPage> LoadChartHistoryAsync(string timeframe,long before,string scope,CancellationToken ct)
+    {
+        var state=View;
+        if(state.Mode!="live" || state.Scope!=scope)throw new ArgumentException("工作区已变化，请重新加载历史。");
+        var page=await chartHistory.LoadAsync(timeframe,before,state.Cutoff,ct);
+        if(View.Scope!=scope || View.Mode!="live")throw new ArgumentException("工作区已变化，请重新加载历史。");
+        return page;
+    }
+
     public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null, TimeProvider? timeProvider = null, bool useFixture = false,CoinalyzeEngine? coinalyze=null)
     {
         this.store = store; this.okx = okx; this.orderFlow = orderFlow;this.coinalyze=coinalyze; clock = timeProvider ?? TimeProvider.System;
         profileHistory = new(store, okx);
+        chartHistory = new(store, okx);
         this.useFixture = useFixture; fixture = useFixture ? DemoMarket.Generate() : [];
         var earliest = clock.GetUtcNow().AddDays(-40).ToUnixTimeMilliseconds();
         contextCache = store.ReadCandles("live:analysis", earliest, Now).ToArray();

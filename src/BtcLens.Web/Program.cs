@@ -49,7 +49,6 @@ if (!offlineFixture)
     builder.Services.AddHostedService<BinanceFlowWorker>();
     builder.Services.AddHostedService<PriceContextWorker>();
     builder.Services.AddHostedService<CoinalyzeWorker>();
-    builder.Services.AddHostedService<StudyLifecycleWorker>();
 }
 
 var app = builder.Build();
@@ -63,6 +62,7 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+app.MapGet("/playbook",()=>Results.Redirect("/"));
 app.MapGet("/healthz", (MarketEngine market) =>
 {
     var state = market.View;

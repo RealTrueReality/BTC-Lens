@@ -45,7 +45,8 @@
             @foreach (var p in ChartProfiles) { <button @onclick='() => SelectAndFocus(new("profile", p.Id))'>@p.Name<small>成交量分布 · @LensFormat.Time(p.Result.Start)</small></button> }
             @foreach (var w in watches.Where(w => w.Enabled)) { <button @onclick='() => SelectAndFocus(new("watch", w.Id))'>@w.Current.Name<small>关注 · @WatchRange(w.Current)</small></button> }
         </div> }
-        <CandleChart @ref="candleChart" Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Tool="@tool" Scope="@view.Scope" TimeRangeSelected="RangePicked" Profiles="ChartProfiles" Drawings="drawings" Selection="selection" ObjectSelected="SelectObject" ObjectChanged="SaveChartObject" ObjectDeleted="DeleteObject" ToolCancelled='() => SetTool("select")' Vwaps="ChartVwaps" EvidenceFocus="focusedEvidence" />
+        <CandleChart @ref="candleChart" Candles="CurrentCandles" Zones="ChartZones" Watches="watches" Levels="view.Levels" ShowLevels="showLevels" Tool="@tool" Scope="@view.Scope" TimeRangeSelected="RangePicked" Profiles="ChartProfiles" Drawings="drawings" Selection="selection" ObjectSelected="SelectObject" ObjectChanged="SaveChartObject" ObjectDeleted="DeleteObject" ToolCancelled='() => SetTool("select")' Vwaps="ChartVwaps" EvidenceFocus="focusedEvidence" CanLoadHistory="@(view.Mode=="live" && !ChartHistory.Exhausted)" OlderHistoryRequested="before=>LoadOlderHistory(before)" />
+        @if(view.Mode=="live"){<div class="chart-history-bar" data-testid="chart-history"><span class="@(ChartHistory.Error is null?"muted":"negative")" role="status">@(ChartHistory.Error??ChartHistory.Status??"向左拖动图表，可加载更早行情。")</span><div class="button-group"><button class="button small" disabled="@(ChartHistory.Loading || ChartHistory.Exhausted || CurrentCandles.Length==0)" @onclick="()=>LoadOlderHistory(CurrentCandles[0].OpenTime,true)">@(ChartHistory.Loading?"正在加载…":"加载更早行情")</button><button class="text-button" @onclick="ShowLatestChart">回到最新</button></div></div>}
         <div class="chart-caption"><span>点击图上区域或标签选择 · 拖动所选绘图调整 · Delete 删除</span><span>UTC+8 · OB / FVG 仅显示未回访区域</span></div>
     </section>
     <section class="panel watch-panel"><div class="panel-heading"><h2>我的关注区 <span class="count-badge">@watches.Length</span></h2><button class="icon-button" aria-label="新增关注区" @onclick="NewWatch">＋</button></div>
@@ -112,9 +113,11 @@
     private ChartDrawing[] drawings = [];
     private CandleChart? candleChart;
     private ChartEvidence? focusedEvidence;
+    private readonly Dictionary<string,HistoryState> chartHistories=[];
+    private HistoryState ChartHistory {get{if(!chartHistories.TryGetValue(timeframe,out var state)){state=new();chartHistories[timeframe]=state;}return state;}}
     private Candle[] CurrentCandles => PriceContextRules.DisplayBars((timeframe == "5m" ? view.ContextCandles : [])
         .Concat(ChartProfiles.OrderBy(p => p.CreatedAt).SelectMany(p => p.SourceBars)), timeframe, view.Cutoff)
-        .Concat(view.Candles.GetValueOrDefault(timeframe) ?? []).GroupBy(c => c.OpenTime).Select(g => g.Last()).OrderBy(c => c.OpenTime).ToArray();
+        .Concat(ChartHistory.Bars).Concat(view.Candles.GetValueOrDefault(timeframe) ?? []).GroupBy(c => c.OpenTime).Select(g => g.Last()).OrderBy(c => c.OpenTime).ToArray();
     private SavedProfile[] ChartProfiles => showProfile ? view.PriceContext.Profiles.Where(p => p.Visible).ToArray() : [];
     private DetectedZone? SelectedZone => selection?.Kind == "zone" ? ChartZones.FirstOrDefault(z => z.Id == selection.Id) : null;
     private ChartDrawing? SelectedDrawing => selection?.Kind == "drawing" ? drawings.FirstOrDefault(d => d.Id == selection.Id) : null;
@@ -132,7 +135,7 @@
     private void Reload()
     {
         var oldScope = view.Scope; view = Market.View; watches = Store.Watches(view.Scope); alerts = Store.Alerts(view.Scope); drawings = Store.Drawings(view.Scope);
-        if (oldScope != view.Scope) { CloseEditor(); selectedAlert = null; report = null; tool = "select"; selection = null; selectedProfileId = Store.GetSetting("selected-profile:" + view.Scope); }
+        if (oldScope != view.Scope) { foreach(var history in chartHistories.Values)history.Request?.Cancel();chartHistories.Clear();CloseEditor(); selectedAlert = null; report = null; tool = "select"; selection = null; selectedProfileId = Store.GetSetting("selected-profile:" + view.Scope); }
         if (!view.PriceContext.Profiles.Any(p => p.Id == selectedProfileId)) selectedProfileId = view.PriceContext.Profiles.FirstOrDefault()?.Id;
         if (selection is not null && (selection.Kind == "zone" && SelectedZone is null || selection.Kind == "drawing" && SelectedDrawing is null || selection.Kind == "watch" && SelectedWatch is null || selection.Kind == "profile" && !ChartProfiles.Any(p => p.Id == selection.Id))) selection = null;
     }
@@ -228,7 +231,25 @@
     private async Task Download(string name, string json) { await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/files.js"); await module.InvokeVoidAsync("download", name, Pretty(json)); }
     private Task ExportAlert() => Download("btclens-event.json", JsonCodec.Write(selectedAlert));
     private Task ExportReport() => Download("btclens-analysis.json", JsonCodec.Write(report));
-    public void Dispose() => Market.Changed -= Changed;
+    private async Task LoadOlderHistory(long before,bool reveal=false)
+    {
+        var history=ChartHistory;if(view.Mode!="live" || history.Loading || history.Exhausted || before<=0 || CurrentCandles.FirstOrDefault()?.OpenTime!=before)return;
+        var tf=timeframe;var currentScope=view.Scope;var request=new CancellationTokenSource();history.Request=request;history.Loading=true;history.Error=null;history.Status="正在补取 "+tf+" 历史行情…";
+        try
+        {
+            var page=await Market.LoadChartHistoryAsync(tf,before,currentScope,request.Token);
+            if(request.IsCancellationRequested || view.Scope!=currentScope)return;
+            history.Bars=history.Bars.Concat(page.Bars).GroupBy(c=>c.OpenTime).Select(g=>g.Last()).OrderBy(c=>c.OpenTime).ToArray();history.Exhausted=page.Exhausted;
+            history.Status=page.Exhausted?"交易所未返回更早行情。":"已补充 "+history.Bars.Length+" 根 "+tf+" 历史 K 线 · 可继续向左拖动。";
+            if(reveal && timeframe==tf && page.Bars.Length>0 && candleChart is not null)await candleChart.ShowRangeAsync(page.Bars[0].OpenTime,before+100*Timeframes.Milliseconds(tf));
+        }
+        catch(OperationCanceledException)when(request.IsCancellationRequested){}
+        catch(Exception ex){history.Error=ex is InvalidDataException or ArgumentException?ex.Message:"历史行情暂时加载失败，请点击「加载更早行情」重试。";}
+        finally{history.Loading=false;history.Request=null;request.Dispose();}
+    }
+    private Task ShowLatestChart()=>candleChart?.ShowLatestAsync()??Task.CompletedTask;
+    public void Dispose(){Market.Changed-=Changed;foreach(var history in chartHistories.Values)history.Request?.Cancel();}
+    private sealed class HistoryState{public Candle[] Bars=[];public bool Loading,Exhausted;public string? Status,Error;public CancellationTokenSource? Request;}
     private string WatchRange(WatchVersion version) => WatchRules.Bounds(version, view.Quote?.Timestamp ?? view.Cutoff) is { } b ? $"{LensFormat.Price(b.Lower)} — {LensFormat.Price(b.Upper)}" : "趋势线已延伸至无效价格";
     private sealed class WatchEditor { public string Name { get; set; } = "我的关注区"; public decimal Lower { get; set; } public decimal Upper { get; set; } public string Timeframe { get; set; } = "5m"; public Bias Bias { get; set; } public string Notes { get; set; } = ""; public string? SourceId { get; set; } public PriceReference? Reference { get; set; } public ChartAnchor? Anchor { get; set; } public TrendWatch? Trend { get; set; } public decimal Distance { get; set; } = 25; }
 }

@@ -35,6 +35,11 @@ public sealed class StudyStore(ILensStore store)
             var target=study.Steps.First(s=>s.Id=="target");if(target.State is "consumed" or "invalidated")RecordTerminal(market.Scope,intent.Revision,target.State,market.Cutoff,target.Detail);
             return study;}
     }
+    public StudySnapshot BuildDefaultStudy(MarketView market,WatchZone[] watches,int minutes)
+    {
+        var study=StudyWorkflow.Build(market,MarketReader.Build(market,watches,minutes),RuleProfile.Default,StudyIntent.Empty);
+        return study with {Warnings=study.Warnings.Where(w=>!w.StartsWith("个人规则卡仍有未复核项",StringComparison.Ordinal)).ToArray()};
+    }
     public void ObserveQuote(MarketView market)
     {
         lock(sync){var intent=Intent(market.Scope);if(intent.Revision==0 || Terminal(market.Scope,intent.Revision) is not null || market.Mode!="live" ||

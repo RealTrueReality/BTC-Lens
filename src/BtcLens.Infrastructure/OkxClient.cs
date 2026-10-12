@@ -22,14 +22,16 @@ public sealed class OkxClient(HttpClient http)
         using var doc = await Get($"api/v5/market/candles?instId=BTC-USDT-SWAP&bar={timeframe}&limit=300", ct);
         return ParseCandles(doc.RootElement.GetProperty("data"), timeframe);
     }
-    public async Task<Candle[]> HistoryCandlesAsync(long after, CancellationToken ct)
+    public Task<Candle[]> HistoryCandlesAsync(long after, CancellationToken ct)=>HistoryCandlesAsync("5m",after,ct);
+    public async Task<Candle[]> HistoryCandlesAsync(string timeframe,long after, CancellationToken ct)
     {
+        if(!Timeframes.All.Append("1W").Contains(timeframe) || after<=0)throw new ArgumentException("Unsupported history timeframe or cursor.");
         await historyGate.WaitAsync(ct);
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
-            using var doc = await Get($"api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=5m&limit=300&after={after}", ct, allowEmpty: true);
-            return ParseCandles(doc.RootElement.GetProperty("data"), "5m");
+            using var doc = await Get($"api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar={timeframe}&limit=300&after={after}", ct, allowEmpty: true);
+            return ParseCandles(doc.RootElement.GetProperty("data"), timeframe);
         }
         finally
         {

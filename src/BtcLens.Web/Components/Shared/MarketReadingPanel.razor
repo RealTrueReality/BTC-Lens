@@ -1,17 +1,16 @@
 @implements IDisposable
 @inject IJSRuntime JS
-@inject NavigationManager Navigation
 @inject StudyStore Studies
 @inject QianwenClient Qianwen
 @inject BtcLens.Web.Services.ModelConnection ModelConnection
 <section class="panel reading-panel" data-testid="market-reading">
-    <div class="panel-heading"><div><span class="eyebrow">POSITION + ORDER FLOW</span><h2>行情解读</h2></div><div class="flow-controls"><a class="text-button" href="/playbook">我的看盘规则 ↗</a><label>分析窗口<select aria-label="行情分析窗口" @bind="minutes"><option value="15">最近 15 分钟</option><option value="60">最近 1 小时</option></select></label><button class="button small" @onclick="Generate">分析当前行情</button></div></div>
-    <p class="muted">先整理可核对的证据，再由模型结合你的规则解释。每次生成保留当前快照。</p>
+    <div class="panel-heading"><div><span class="eyebrow">POSITION + ORDER FLOW</span><h2>行情解读</h2></div><div class="flow-controls"><label>分析窗口<select aria-label="行情分析窗口" @bind="minutes"><option value="15">最近 15 分钟</option><option value="60">最近 1 小时</option></select></label><button class="button small" @onclick="Generate">分析当前行情</button></div></div>
+    <p class="muted">结合图上关注位置、价格反应和现货 / 合约订单流分析。每次生成保留当前快照。</p>
     @if(study is {} snapshot)
     {
         var r=snapshot.Reading;
-        <div class="reading-summary"><h3>@r.Regime</h3><span class="pill amber">@r.Quality</span><p>@r.Minutes 分钟窗口 · @r.Window.Source · @LensFormat.Time(r.Window.Start) → @LensFormat.Time(r.Window.End) · 分析时间 @LensFormat.Time(r.KnownAt) · 规则 v@(snapshot.Profile.Revision)</p></div>
-        <div class="study-steps">@foreach(var step in snapshot.Steps){<article><div><b>@step.Label</b><span class="pill">@StateName(step.State)</span></div><p>@step.Detail</p>@foreach(var id in step.EvidenceIds){@if(snapshot.ChartEvidence.FirstOrDefault(e=>e.Id==id) is {} e){<button class="text-button" @onclick="()=>Locate(e)">@e.Timeframe @e.Label · 图上定位 ↗</button>}}</article>}</div>
+        <div class="reading-summary"><h3>@r.Regime</h3><span class="pill amber">@r.Quality</span><p>@r.Minutes 分钟窗口 · @r.Window.Source · @LensFormat.Time(r.Window.Start) → @LensFormat.Time(r.Window.End) · 分析时间 @LensFormat.Time(r.KnownAt)</p></div>
+        <div class="study-steps">@foreach(var step in snapshot.Steps.Where(s=>s.Id!="target")){<article><div><b>@step.Label</b><span class="pill">@StateName(step.State)</span></div><p>@step.Detail</p>@foreach(var id in step.EvidenceIds){@if(snapshot.ChartEvidence.FirstOrDefault(e=>e.Id==id) is {} e){<button class="text-button" @onclick="()=>Locate(e)">@e.Timeframe @e.Label · 图上定位 ↗</button>}}</article>}</div>
         <div class="reading-columns"><div><h3>位置与成交证据</h3><ul>@foreach(var line in r.Evidence){<li>@line</li>}</ul></div><div><h3>冲突与待确认</h3><ul>@foreach(var line in r.Conflicts.Concat(r.Missing).Concat(snapshot.Warnings)){<li>@line</li>}</ul><h3>接下来观察</h3><ul>@foreach(var line in r.Conditions){<li>@line</li>}</ul></div></div>
         <section class="ai-reading" data-testid="ai-reading"><div class="panel-heading"><h3>AI 行情解释</h3><div class="flow-controls"><span>@ModelConnection.Model</span><button class="button small primary" disabled="@(busy || ModelConnection.Key is null)" @onclick="Explain">@(busy?"正在解释快照…":"AI 解释当前快照")</button>@if(busy){<button class="button small ghost" @onclick="Cancel">取消</button>}</div></div>
             @if(ModelConnection.Key is null){<p class="form-note">先在<a href="/settings">数据连接</a>保存千问模型 Key。</p>}
@@ -22,7 +21,7 @@
         <details><summary>覆盖市场与规则</summary><p>现货：@string.Join(" / ",r.Window.SpotSources)</p><p>合约：@string.Join(" / ",r.Window.PerpetualSources)</p><p>OI：@r.Window.OiSource</p><p>参考阈值：价格 @snapshot.Profile.Parameters.PricePercent%，成交差 / 总量 @snapshot.Profile.Parameters.FlowPercent%，OI @snapshot.Profile.Parameters.OiPercent%。</p><code>@snapshot.Algorithm · @r.Algorithm</code></details>
         <div class="modal-actions"><button class="text-button" @onclick="Export">导出这次分析 ↗</button></div>
     }
-    else{<p class="form-note">生成时检查同一窗口的数据覆盖。目标、来源资格与失效仍由你定义。</p>}
+    else{<p class="form-note">在图上选好关注位置后，点击「分析当前行情」查看证据和下一步观察条件。</p>}
 </section>
 @code {
     [Parameter] public MarketView View {get;set;}=MarketView.Empty;
@@ -30,13 +29,13 @@
     [Parameter] public EventCallback<ChartEvidence> EvidenceLocated {get;set;}
     private int minutes=15;private StudySnapshot? study;private ModelNarrative? narrative;private string scope="";private bool busy;private string? aiError,citedRef;private CancellationTokenSource? request;
     protected override void OnParametersSet(){if(scope!=View.Scope){Cancel();study=null;narrative=null;scope=View.Scope;}}
-    private void Generate(){Cancel();narrative=null;aiError=null;citedRef=null;study=Studies.BuildStudy(View,Watches,minutes);Studies.SaveAnalysis(study);}
+    private void Generate(){Cancel();narrative=null;aiError=null;citedRef=null;study=Studies.BuildDefaultStudy(View,Watches,minutes);Studies.SaveAnalysis(study);}
     private async Task Explain(){if(study is not {} frozen || ModelConnection.Key is not {} key)return;Cancel();request=new();var current=request;busy=true;aiError=null;try{var answer=await Qianwen.ExplainAsync(key,ModelConnection.Model,frozen,current.Token);if(current==request && study?.Id==frozen.Id){narrative=answer;Studies.SaveAnalysis(frozen,answer);}}catch(OperationCanceledException)when(current.IsCancellationRequested){}catch(Exception ex){if(current==request)aiError=ex is InvalidDataException or ArgumentException?ex.Message:"模型网络或回复格式异常，本次解释未采用；规则证据仍保留。";}finally{if(current==request){busy=false;request=null;}current.Dispose();}}
     private void Cancel(){request?.Cancel();request=null;busy=false;}
     private Task Locate(ChartEvidence evidence)=>EvidenceLocated.InvokeAsync(evidence);
-    private Task Reference(string id){citedRef=id;if(study?.ChartEvidence.FirstOrDefault(e=>e.Id==id) is {} e)return Locate(e);if(id.StartsWith("rule:"))Navigation.NavigateTo("/playbook");return Task.CompletedTask;}
-    private string CitationDetail(string id)=>study is null?"":id=="flow-window"?$"{study.Reading.Window.Source} · 现货差 {study.Reading.Window.SpotDelta:0.####} BTC / 合约差 {study.Reading.Window.PerpetualDelta:0.####} BTC / OI 变化 {study.Reading.Window.OiPercent:0.###}%":id=="target-state"?study.Steps.First(s=>s.Id=="target").Detail:id=="price-window"?$"价格变化 {study.Reading.Window.PricePercent:0.###}% · {LensFormat.Time(study.Reading.Window.Start)} → {LensFormat.Time(study.Reading.Window.End)}":string.Join(" ",study.Reading.Evidence.Where(s=>s.StartsWith("1D ") || s.StartsWith("4H ")));
-    private string ReferenceName(string id)=>study?.ChartEvidence.FirstOrDefault(e=>e.Id==id)?.Label??(id=="flow-window"?"订单流窗口":id=="price-window"?"价格窗口":id=="macro-context"?"高周期背景":id=="target-state"?"目标状态":StudyRules.Cards.FirstOrDefault(c=>"rule:"+c.Id==id)?.Title??id);
+    private Task Reference(string id){citedRef=id;if(study?.ChartEvidence.FirstOrDefault(e=>e.Id==id) is {} e)return Locate(e);return Task.CompletedTask;}
+    private string CitationDetail(string id)=>study is null?"":StudyRules.Cards.FirstOrDefault(c=>"rule:"+c.Id==id) is {} card?card.Title+"："+card.Summary:id=="flow-window"?$"{study.Reading.Window.Source} · 现货差 {study.Reading.Window.SpotDelta:0.####} BTC / 合约差 {study.Reading.Window.PerpetualDelta:0.####} BTC / OI 变化 {study.Reading.Window.OiPercent:0.###}%":id=="target-state"?"当前提供盘面和到区反应的分析；这些证据不能自动构成完整交易计划。":id=="price-window"?$"价格变化 {study.Reading.Window.PricePercent:0.###}% · {LensFormat.Time(study.Reading.Window.Start)} → {LensFormat.Time(study.Reading.Window.End)}":string.Join(" ",study.Reading.Evidence.Where(s=>s.StartsWith("1D ") || s.StartsWith("4H ")));
+    private string ReferenceName(string id)=>study?.ChartEvidence.FirstOrDefault(e=>e.Id==id)?.Label??(id=="flow-window"?"订单流窗口":id=="price-window"?"价格窗口":id=="macro-context"?"高周期背景":id=="target-state"?"交易计划完整性":StudyRules.Cards.FirstOrDefault(c=>"rule:"+c.Id==id)?.Title??id);
     private static string StateName(string state)=>state switch{"observed"=>"已观测","missing"=>"缺少证据","waiting"=>"等待","reference_candidate"=>"参考候选","supported_candidate"=>"参考序列支持","unsupported_candidate"=>"支持不足","consumed"=>"已消费","invalidated"=>"已越过失效参考","needs_review"=>"待复核","observed_manual"=>"人工目标已记录",_=>"未定"};
     private async Task Export(){await using var files=await JS.InvokeAsync<IJSObjectReference>("import","./js/files.js");await files.InvokeVoidAsync("download","btclens-market-reading.json",JsonCodec.Write(new {reading=study?.Reading,study,narrative}));}
     public void Dispose()=>Cancel();

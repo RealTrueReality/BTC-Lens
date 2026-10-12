@@ -19,12 +19,15 @@
     [Parameter] public EventCallback<DrawingChange> ObjectChanged { get; set; }
     [Parameter] public EventCallback ToolCancelled { get; set; }
     [Parameter] public ChartEvidence? EvidenceFocus {get;set;}
+    [Parameter] public bool CanLoadHistory {get;set;}
+    [Parameter] public EventCallback<long> OlderHistoryRequested {get;set;}
     private ElementReference host;
     private IJSObjectReference? module;
     private IJSObjectReference? chart;
     private DotNetObjectReference<CandleChart>? reference;
     private string identity = "";
     private ChartObjectSelection? pendingFocus;
+    private (long Start,long End)? pendingRange;
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         try
@@ -50,8 +53,9 @@
                     p.Result.Rows, p.Result.Poc, p.Result.Vah, p.Result.Val, p.Result.PocRow, p.Result.VaLowRow, p.Result.VaHighRow }), ChartVwapData(),
                 Drawings.Select(d => new { id = d.Id, revision = d.Revision, drawingKind = d.Kind.ToString(), label = d.Name,
                     start = d.Start / 1000, end = d.End / 1000, price1 = d.Price1, price2 = d.Price2 }), Selection, Scope,
-                EvidenceFocus is {} e?new {id=e.Id,label="分析证据 · "+e.Label+" · "+LensFormat.Time(e.KnownAt),start=e.Start/1000,end=e.KnownAt/1000,lower=e.Lower,upper=e.Upper}:null);
+                EvidenceFocus is {} e?new {id=e.Id,label="分析证据 · "+e.Label+" · "+LensFormat.Time(e.KnownAt),start=e.Start/1000,end=e.KnownAt/1000,lower=e.Lower,upper=e.Upper}:null,CanLoadHistory);
             if (pendingFocus is { } focus && await chart.InvokeAsync<bool>("focus", focus.Kind, focus.Id)) pendingFocus = null;
+            if(pendingRange is {} range){await chart.InvokeVoidAsync("showRange",range.Start/1000,range.End/1000);pendingRange=null;}
         }
         catch (JSDisconnectedException) { }
     }
@@ -60,7 +64,10 @@
     [JSInvokable] public Task DeleteObject(string kind, string id) => ObjectDeleted.InvokeAsync(new(kind, id));
     [JSInvokable] public Task SaveObject(DrawingChange change) => ObjectChanged.InvokeAsync(change);
     [JSInvokable] public Task CancelTool() => ToolCancelled.InvokeAsync();
+    [JSInvokable] public Task LoadOlder(long before)=>OlderHistoryRequested.InvokeAsync(before*1000);
     public Task FocusAsync(string kind, string id) { pendingFocus = new(kind, id); return InvokeAsync(StateHasChanged); }
+    public Task ShowRangeAsync(long start,long end){pendingRange=(start,end);return InvokeAsync(StateHasChanged);}
+    public async Task ShowLatestAsync(){if(chart is not null)await chart.InvokeVoidAsync("latest");}
     private object[] ChartVwapData()
     {
         return Vwaps.Select(v =>

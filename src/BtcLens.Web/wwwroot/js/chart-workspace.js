@@ -1,7 +1,7 @@
 export function create(host, dotnet) {
     host.replaceChildren();
     const L = window.LightweightCharts;
-    let focusBounds = null,evidenceFocus=null;
+    let focusBounds = null,evidenceFocus=null,historyEnabled=false,historyLoading=false,requestedBefore=null,lastHistoryGesture=0,updating=false;
     const chart = L.createChart(host, {
         autoSize: true,
         layout: { background: { color: '#13191d' }, textColor: '#86939b', fontFamily: 'Segoe UI, sans-serif', fontSize: 11, attributionLogo: true },
@@ -28,6 +28,14 @@ export function create(host, dotnet) {
         tool = 'select', selection = null, scope = '', first = null, preview = null, drag = null, pointerStart = null,
         suppressClick = false, frame = 0, disposed = false, priceLines = [], vwapSeries = [], initialized = false;
     const invoke = (method, ...args) => dotnet.invokeMethodAsync(method, ...args).catch(error => { if (!disposed) console.error(error); });
+    const historyGesture=event=>{if(event.type!=='pointermove' || event.buttons)lastHistoryGesture=performance.now();};
+    const olderHistory=range=>{
+        const before=times[0];
+        if(disposed || updating || !historyEnabled || historyLoading || tool!=='select' || !range || range.from>20 || !before || before===requestedBefore || performance.now()-lastHistoryGesture>1200 || lastHistoryGesture===0)return;
+        requestedBefore=before;historyLoading=true;
+        invoke('LoadOlder',before).finally(()=>historyLoading=false);
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(olderHistory);
     const plot = () => ({ width: host.clientWidth - chart.priceScale('right').width(), height: host.clientHeight - chart.timeScale().height() });
     const step = () => candles[0] ? candles[0].closeTime - candles[0].time : 300;
     const logicalAt = time => {
@@ -236,8 +244,11 @@ export function create(host, dotnet) {
     const abortPointer = () => {pointerStart=null;drag=null;buildObjects();setInteraction();primitive.refresh?.();};
     host.addEventListener('click',pick); host.addEventListener('pointerdown',down,true); host.addEventListener('pointermove',move,true);
     host.addEventListener('pointerup',up,true); host.addEventListener('pointercancel',abortPointer); document.addEventListener('keydown',keys);
+    host.addEventListener('pointerdown',historyGesture,true);host.addEventListener('pointermove',historyGesture,true);host.addEventListener('wheel',historyGesture,{passive:true,capture:true});
     return {
-        update(nextCandles,nextZones,nextWatches,levels,nextTool,reset,nextProfiles,vwaps,nextDrawings,nextSelection,nextScope,nextEvidence=null) {
+        update(nextCandles,nextZones,nextWatches,levels,nextTool,reset,nextProfiles,vwaps,nextDrawings,nextSelection,nextScope,nextEvidence=null,nextHistoryEnabled=false) {
+            updating=true;historyEnabled=nextHistoryEnabled;if(reset){requestedBefore=null;lastHistoryGesture=0;}
+            try{
             const range=initialized&&!reset?chart.timeScale().getVisibleLogicalRange():null;
             const oldTimes=times;
             let shift=0;
@@ -261,16 +272,21 @@ export function create(host, dotnet) {
             if(range)chart.timeScale().setVisibleLogicalRange({from:range.from+shift,to:range.to+shift});else if(candles.length)chart.timeScale().setVisibleLogicalRange({from:Math.max(0,candles.length-115),to:candles.length+12});
             initialized=true;primitive.refresh?.();scheduleLabels();
             host.dataset.evidenceId=evidenceFocus?.id||'';
+            Object.assign(host.dataset,{candleCount:String(candles.length),firstTime:String(times[0]||0),lastTime:String(times.at(-1)||0),periodSeconds:String(step())});
+            }finally{updating=false;}
         },
         focus(kind,id) {
+            lastHistoryGesture=0;
             const obj=objects.find(o=>o.kind===kind&&o.id===id);if(!obj)return false; focusBounds={lower:obj.lower,upper:obj.upper};
             const a=logicalAt(obj.start),b=obj.extend?Math.max(a+10,times.length-1):logicalAt(obj.end),padding=Math.max(8,(b-a)*.15);
             chart.timeScale().setVisibleLogicalRange({from:a-padding,to:b+padding});primitive.refresh?.();scheduleLabels();return true;
         },
+        showRange(start,end){lastHistoryGesture=0;const a=logicalAt(start),b=logicalAt(end);if(a!==null && b!==null)chart.timeScale().setVisibleLogicalRange({from:a-5,to:b+5});},
+        latest(){lastHistoryGesture=0;chart.timeScale().setVisibleLogicalRange({from:Math.max(0,times.length-115),to:times.length+12});},
         dispose() {
             disposed=true;if(frame)cancelAnimationFrame(frame);
             host.removeEventListener('click',pick);host.removeEventListener('pointerdown',down,true);host.removeEventListener('pointermove',move,true);
-            host.removeEventListener('pointerup',up,true);host.removeEventListener('pointercancel',abortPointer);document.removeEventListener('keydown',keys);chart.remove();labels.remove();buttons.clear();
+            host.removeEventListener('pointerup',up,true);host.removeEventListener('pointercancel',abortPointer);host.removeEventListener('pointerdown',historyGesture,true);host.removeEventListener('pointermove',historyGesture,true);host.removeEventListener('wheel',historyGesture,true);document.removeEventListener('keydown',keys);chart.timeScale().unsubscribeVisibleLogicalRangeChange(olderHistory);chart.remove();labels.remove();buttons.clear();
         }
     };
 }

@@ -19,6 +19,7 @@ public sealed class QianwenClient(HttpClient http)
         回复 JSON：summary（简短盘面解释），support（支持证据），conflicts（冲突/缺失），watch（接下来条件）。
         三个数组里的每项包含 text 与 evidenceIds，必须从输入 references 中引用真实存在的 ID。
         建议先写可能的行情解释，再写会推翻该解释的观测条件。说明是当前快照的条件性解读。
+        当前应用使用默认参考规则，用户无需填写规则表或人工观察路线。交易条件不足时说明缺失，不引导用户去已移除的规则页面。
         """;
     public async Task VerifyAsync(string key,string model,CancellationToken ct)
     {

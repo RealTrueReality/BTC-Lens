@@ -55,6 +55,20 @@ public sealed class StudyTests
         var market=MarketReadingTests.Fixture();var normal=MarketReader.Build(market,[]);var strict=MarketReader.Build(market,[],15,new(FlowPercent:45));
         Assert.Contains("现货与合约主动买入",normal.Regime);Assert.DoesNotContain("现货与合约主动买入",strict.Regime);Assert.Contains(strict.Conflicts,s=>s.Contains("45%"));
     }
+    [Fact] public void DefaultAnalysisDoesNotApplyHiddenLegacySettingsOrRewriteTheirHistory()
+    {
+        var path=Path.Combine(Path.GetTempPath(),"btclens-default-study-"+Guid.NewGuid().ToString("N"),"test.db");
+        try{using var store=new LensStore(path);var studies=new StudyStore(store);var market=MarketReadingTests.Fixture();
+            studies.SaveProfile(RuleProfile.Default with {Parameters=new(PivotSize:3,FlowPercent:45)},0,market.Cutoff);
+            studies.SaveIntent("live",new(0,0,Bias.Bullish,110,90,"旧路线",true),0,market);
+            var originalProfiles=store.GetSetting("study:profiles");var originalIntents=store.GetSetting("study:intent:live");
+            var current=studies.BuildDefaultStudy(market,[],15);
+            Assert.Equal(0,current.Profile.Revision);Assert.Equal(new StudyParameters(),current.Profile.Parameters);Assert.Equal(StudyIntent.Empty,current.Intent);
+            Assert.Contains("现货与合约主动买入",current.Reading.Regime);Assert.DoesNotContain(current.Warnings,w=>w.StartsWith("个人规则卡仍有未复核项"));
+            Assert.Equal(originalProfiles,store.GetSetting("study:profiles"));Assert.Equal(originalIntents,store.GetSetting("study:intent:live"));
+            Assert.DoesNotContain(current.ChartEvidence,e=>e.Kind is "target" or "invalidation");
+        }finally{Directory.Delete(Path.GetDirectoryName(path)!,true);}
+    }
     [Fact] public void EarlierInvalidationCannotBeReplacedByALaterTargetTouch()
     {
         var market=MarketReadingTests.Fixture();var bars=market.Candles["5m"];
