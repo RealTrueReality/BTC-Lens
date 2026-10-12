@@ -63,7 +63,8 @@
     </section>
 </div>
 <PriceContextPanel @ref="contextPanel" View="view" SelectedId="@selectedProfileId" SelectedChanged="SelectProfile" LocateRequested="FocusProfile" DrawRange="ToggleRangeDrawing" LevelPicked="FromPriceReference" Timeframe="@timeframe" />
-<OrderFlowPanel Flow="view.Flow" Candles="CurrentCandles" />
+<OrderFlowPanel Flow="view.Flow" Provider="view.ProviderFlow" Candles="CurrentCandles" />
+<MarketReadingPanel View="view" Watches="watches" />
 <div class="lower-grid single-column">
     <section class="panel"><div class="panel-heading"><h2>观察记录</h2><span class="subtle-label">证据随事件保存</span></div><div class="event-list">
         @foreach (var a in alerts.Take(4)) { <button class="event-row" @onclick="() => selectedAlert = a"><span class="event-icon">↳</span><span><b>@a.Zone.Name</b><small>@LensFormat.Time(a.CreatedAt) · 观测价 <span class="mono">@LensFormat.Price(a.Price)</span></small></span><span class="push-right muted">查看 →</span></button> }

@@ -19,7 +19,11 @@ Binance `m=true` 表示买方为 maker，因此主动方为卖；否则为主动
 ## 免费 API 的选择
 
 - **Binance / OKX 公共成交**：当前接入路径，无需账户或付费 Key，应用自行计算与汇总 CVD。Binance 永续 `aggTrade` 使用新的 `/market` 路由。
-- **Coinalyze**：官方 API 免费，需要注册领取 Key。可查询现货/合约市场、OHLCV 与买入量、OI 等；仅对 `has_buy_sell_data=true` 的市场计算 `Delta = 2 × bv − v`，统一各市场原生数量口径后才能汇总。限制为每分钟 40 次调用，批量每个 symbol 单独计次数；日内保留约 1,500–2,000 点，日线历史不按此规则清理。当前未接入，适合以后补充已有历史。
+- **Coinalyze（V0.2.5 可选接入）**：官方 API 免费，需要注册领取 Key，在本地「数据连接」填写。查询现货/合约市场、OHLCV 与主动买入量、历史 OI；仅对 `has_buy_sell_data=true` 的市场计算 `Delta = 2 × bv − v`。支持 BTC/USD、USDT、USDC 现货，以及原生量为 BTC 的稳定币保证金永续；不混入币本位、交割或未知单位。限制为每分钟 40 个调用额度，批量每个 symbol 单独计数；日内保留约 1,500–2,000 点，日线历史不按此规则清理。真实连接仍需用户 Key，当前未声称已完成真实账户联调。
+
+Coinalyze 默认每种市场取最多六个不同交易所（同一交易所优先 USDT），用户可修改选择。每次刷新最多 28 个额度，現货每个 1、永续每个 2（成交量 + OI）；服务端滑动分钟限额 35，按 `Retry-After` 延后请求。每 90 秒查询最近 24h 的 1m 数据，只请求已收盘时间。默认覆盖列表是支持列表的子集，不能称作全市场。BTC 原生量直接汇总，OI 使用 `convert_to_usd=false`；不以收盘价估算历史美元主动量。
+
+所选现货与所选永续各自要求所有市场完整覆盖该分钟，缺少一个则该分钟不显示；CVD 缺口后从零开始。OI 只在所有所选永续都返回同一收盘分钟时相加。配置变更清除当前计算视图，不跨市场组合拼接基线。快照保存提供方原始分钟数据、市场元数据、选择和获取时间，不含 Key。断线保留旧历史；已配置却不可用时不自动用公共采集代替 Coinalyze 确认。
 - **CoinGlass**：仅参考操作与指标分类；未抓取网页数据或接入付费服务。官方汇总 CVD 接口需要有权限的 Key。
 
 来源：[OKX 官方 API](https://app.okx.com/docs-v5/en/)、[Binance 现货公共流](https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams)、[Binance 永续公共流与新路由](https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Connect)、[Coinalyze 免费 API 文档](https://api.coinalyze.net/v1/doc/)、[CoinGlass 汇总 CVD](https://docs.coinglass.com/reference/futures-aggregated-cvd-history)。

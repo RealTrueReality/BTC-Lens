@@ -57,3 +57,4 @@ jobs:
             test-results/chart-workspace/
             test-results/profile-history/
             test-results/trend-flow/
+            test-results/market-reading/

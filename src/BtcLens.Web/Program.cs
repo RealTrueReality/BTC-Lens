@@ -4,6 +4,7 @@ using BtcLens.Infrastructure;
 using BtcLens.Web.Services;
 using MudBlazor.Services;
 using Serilog;
+using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseStaticWebAssets();
@@ -15,16 +16,25 @@ builder.Host.UseSerilog((ctx, services, logger) => logger.MinimumLevel.Informati
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
-builder.Services.AddSingleton<ILensStore>(_ => new LensStore(builder.Configuration["DatabasePath"] ?? Path.Combine(builder.Environment.ContentRootPath, "App_Data", "btclens.db")));
+var databasePath=Path.GetFullPath(builder.Configuration["DatabasePath"] ?? Path.Combine(builder.Environment.ContentRootPath,"App_Data","btclens.db"));
+builder.Services.AddSingleton<ILensStore>(_ => new LensStore(databasePath));
+var protection=builder.Services.AddDataProtection().SetApplicationName("BtcLens").PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(Path.GetDirectoryName(databasePath)!,"data-protection-keys")));
+if(OperatingSystem.IsWindows())protection.ProtectKeysWithDpapi();
+builder.Services.AddSingleton<CoinalyzeConnection>();
+var coinalyzeHttp=builder.Services.AddHttpClient<CoinalyzeClient>(client=>{client.BaseAddress=new Uri("https://api.coinalyze.net/v1/");client.Timeout=TimeSpan.FromSeconds(15);});
+builder.Services.AddSingleton<CoinalyzeEngine>(services=>new(services.GetRequiredService<CoinalyzeClient>(),services.GetRequiredService<ILensStore>(),()=>services.GetRequiredService<CoinalyzeConnection>().Key));
 var offlineFixture = builder.Environment.IsEnvironment("Testing") && builder.Configuration.GetValue<bool>("OfflineFixture");
 var okxHttp = builder.Services.AddHttpClient<OkxClient>(client => { client.BaseAddress = new Uri(builder.Configuration["Okx:RestUrl"] ?? "https://www.okx.com/"); client.Timeout = TimeSpan.FromSeconds(8); });
 if (offlineFixture)
 {
+    builder.Services.AddSingleton<OfflineCoinalyzeHandler>();
+    coinalyzeHttp.ConfigurePrimaryHttpMessageHandler(services=>services.GetRequiredService<OfflineCoinalyzeHandler>());
     builder.Services.AddSingleton<OfflineHistoryHandler>();
     okxHttp.ConfigurePrimaryHttpMessageHandler(services => services.GetRequiredService<OfflineHistoryHandler>());
 }
 builder.Services.AddSingleton<MarketEngine>(services => new(services.GetRequiredService<ILensStore>(),
-    services.GetRequiredService<OkxClient>(), services.GetRequiredService<OrderFlowEngine>(), useFixture: offlineFixture));
+    services.GetRequiredService<OkxClient>(), services.GetRequiredService<OrderFlowEngine>(), useFixture: offlineFixture,
+    coinalyze:services.GetRequiredService<CoinalyzeEngine>()));
 builder.Services.AddSingleton<OrderFlowEngine>();
 if (!offlineFixture)
 {
@@ -32,6 +42,7 @@ if (!offlineFixture)
     builder.Services.AddHostedService<OrderFlowWorker>();
     builder.Services.AddHostedService<BinanceFlowWorker>();
     builder.Services.AddHostedService<PriceContextWorker>();
+    builder.Services.AddHostedService<CoinalyzeWorker>();
 }
 
 var app = builder.Build();
@@ -54,6 +65,7 @@ app.MapGet("/healthz", (MarketEngine market) =>
         priceContext = new { state.PriceContext.Status, state.PriceContext.Error, state.PriceContext.OffsetHours,
             candles = state.ContextCandles.Length, profiles = state.PriceContext.Profiles.Length,
             vwaps = state.PriceContext.Vwaps.Select(v => new { v.Period, v.Anchor, v.KnownAt, v.Value, v.Coverage }) },
+        coinalyze = new {state.ProviderFlow.Configured,state.ProviderFlow.Status,state.ProviderFlow.Error,state.ProviderFlow.FetchedAt,state.ProviderFlow.Selected,volumeBars=state.ProviderFlow.Volumes.Length,oiBars=state.ProviderFlow.OpenInterest.Length},
         orderFlow = new { state.Flow.Status, state.Flow.Error, state.Flow.OiError, state.Flow.AsOf,
             instruments = BtcLens.Core.FlowRules.Instruments.Select(i => state.Flow.Latest(i)).Where(s => s is not null),
             sources = BtcLens.Core.FlowRules.Exchanges.SelectMany(e => BtcLens.Core.FlowRules.Instruments.Select(i => state.Flow.Latest(i,e))).Where(s => s is not null), state.Flow.SourceErrors,
@@ -67,6 +79,9 @@ app.MapRazorComponents<App>()
 // Deterministic browser fixtures are available only in an explicitly isolated test host.
 if (offlineFixture)
 {
+    app.MapGet("/test/coinalyze-stats",(OfflineCoinalyzeHandler handler,ILensStore store)=>Results.Ok(new {handler.Requests,
+        protectedKey=store.GetSetting("coinalyze:key") is {} value && value.Length>0 && value!=OfflineCoinalyzeHandler.Key,
+        snapshotContainsKey=(store.GetSetting("coinalyze:snapshot")??"").Contains(OfflineCoinalyzeHandler.Key)}));
     app.MapPost("/test/replay", async (MarketEngine market) => { await market.SwitchModeAsync("demo"); await market.NewReplayAsync(); return Results.Ok(new { market.View.Scope, market.View.Cutoff }); });
     app.MapPost("/test/step/{count:int}", async (int count, MarketEngine market) => { await market.StepAsync(count); return Results.Ok(new { market.View.Cutoff }); });
     app.MapPost("/test/live-history", async (MarketEngine market) => { await market.SwitchModeAsync("live"); await market.RefreshLiveAsync(default); return Results.Ok(new { market.View.Scope }); });

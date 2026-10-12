@@ -40,6 +40,7 @@ public sealed record AnalysisPacket(string GeneratedAt, string Mode, string Tran
     string DataStatus, string[] Observations, string[] Missing, string[] NextSteps)
 {
     public object? PriceContext { get; init; }
+    public MarketReading? Reading { get; init; }
 }
 
 public static class AnalysisReport
@@ -71,6 +72,8 @@ public static class AnalysisReport
             if (!r.Coverage.Complete) missing.Add($"固定范围「{p.Name}」存在缺失或冲突数据；计算仅代表已覆盖部分。");
         }
         if (market.PriceContext.Error is not null) missing.Add(market.PriceContext.Error);
+        if(!market.ProviderFlow.Configured)
+        {
         foreach (var exchange in FlowRules.Exchanges)
         foreach (var instrument in FlowRules.Instruments)
         {
@@ -82,9 +85,16 @@ public static class AnalysisReport
         if (market.Mode == "live" && market.Flow.OpenInterest.LastOrDefault() is { } oi && oi.Timestamp <= market.Cutoff && market.Cutoff - oi.Timestamp <= 30_000)
             facts.Add($"BTC-USDT-SWAP OI {oi.Contracts:0.########} 张 / {oi.CoinBtc:0.########} BTC / {oi.Usd:0.##} USD；时间 {DateTimeOffset.FromUnixTimeMilliseconds(oi.Timestamp):O}。OI 本身不确定多空方向。");
         else missing.Add("永续 OI 未采集、已过期或为合成演示。");
+        }
+        else
+        {
+            facts.Add($"订单流分析来源 Coinalyze，所选市场 {string.Join(", ",market.ProviderFlow.Selected)}；最新获取 {DateTimeOffset.FromUnixTimeMilliseconds(market.ProviderFlow.FetchedAt):O}。");
+            if(!market.ProviderFlow.Fresh(market.Cutoff))missing.Add("Coinalyze 历史数据缺失、请求失败或过期，不能用作当前订单流确认。");
+        }
+        var reading=MarketReader.Build(market,watches);
         return new(DateTimeOffset.FromUnixTimeMilliseconds(market.Cutoff).ToString("O"), market.Mode, market.Transport, market.Status,
             facts.ToArray(), missing.ToArray(),
             ["在日线/4H 确认关注区和目标的不同角色。", "对照选区 VAH/POC/VAL 与日/周/月 VWAP，记录价格所处位置。", "价格到区后观察 15m/5m 反应，记录支持与冲突证据。", "目标、确认与失效依据齐全后，再填写候选交易计划。"])
-            { PriceContext = market.PriceContext.Evidence(market.Cutoff) };
+            { PriceContext = market.PriceContext.Evidence(market.Cutoff),Reading=reading };
     }
 }

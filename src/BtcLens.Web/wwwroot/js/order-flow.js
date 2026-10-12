@@ -18,12 +18,12 @@ export function create(host) {
     const paneLabels=['价格 · OKX 永续 · USDT','现货 CVD / Delta','永续 CVD / Delta','OI · OKX 永续 · BTC'].map(name=>{
         const element=document.createElement('div');element.className='flow-pane-label';element.textContent=name;host.append(element);return element;
     });
-    const values=new Map();let currentUnit='BTC';
+    const values=new Map();let currentUnit='BTC',currentOiSource='OKX';
     chart.subscribeCrosshairMove(event=>{
         if(!event.time){readout.textContent='移动光标查看同一时刻的价格、CVD 与 OI';return;}
         const parts=[new Date(event.time*1000).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai'})];
         const candle=event.seriesData.get(price);if(candle)parts.push('价格 '+candle.close.toFixed(1)+' USDT');
-        for(const [id,line] of lines){const item=event.seriesData.get(line);if(item && !id.startsWith('empty-'))parts.push((id.startsWith('oi-')?'OKX OI':values.get(id)||'CVD')+' '+item.value.toFixed(4)+' '+(id.startsWith('oi-')?'BTC':currentUnit));}
+        for(const [id,line] of lines){const item=event.seriesData.get(line);if(item && !id.startsWith('empty-'))parts.push((id.startsWith('oi-')?currentOiSource+' OI':values.get(id)||'CVD')+' '+item.value.toFixed(4)+' '+(id.startsWith('oi-')?'BTC':currentUnit));}
         for(const [id,line] of histograms){const item=event.seriesData.get(line);if(item)parts.push((values.get(id)||'')+' Delta '+item.value.toFixed(4)+' '+currentUnit);}
         readout.textContent=parts.join(' · ');
     });
@@ -47,8 +47,8 @@ export function create(host) {
         return [...buckets.values()].sort((a, b) => a.time - b.time);
     }
     return {
-        update(points, oi, interval, reset, maxOiGap = 30, candles = [], unit = 'BTC') {
-            currentUnit=unit;price.setData(candles);
+        update(points, oi, interval, reset, maxOiGap = 30, candles = [], unit = 'BTC', oiSource='OKX') {
+            currentUnit=unit;currentOiSource=oiSource;paneLabels[3].textContent='OI · '+oiSource+' · BTC';price.setData(candles);
             const used = new Set(['empty-spot', 'empty-perp', 'empty-oi']);
             for (const instrument of ['BTC-USDT', 'BTC-USDT-SWAP']) {
                 const groups = new Map();

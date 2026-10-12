@@ -1,0 +1,22 @@
+@inject IJSRuntime JS
+<section class="panel reading-panel" data-testid="market-reading">
+    <div class="panel-heading"><div><span class="eyebrow">POSITION + ORDER FLOW</span><h2>行情解读</h2></div><div class="flow-controls"><label>分析窗口<select aria-label="行情分析窗口" @bind="minutes"><option value="15">最近 15 分钟</option><option value="60">最近 1 小时</option></select></label><button class="button small" @onclick="Generate">分析当前行情</button></div></div>
+    <p class="muted">把高周期位置、区域反应和订单流放在一起判断。点击分析后保留当前快照，方便核对。</p>
+    @if(reading is {} r)
+    {
+        <div class="reading-summary"><h3>@r.Regime</h3><span class="pill amber">@r.Quality</span><p>@r.Minutes 分钟窗口 · @r.Window.Source · @LensFormat.Time(r.Window.Start) → @LensFormat.Time(r.Window.End) · 分析时间 @LensFormat.Time(r.KnownAt)</p></div>
+        <div class="reading-columns"><div><h3>位置与成交证据</h3><ul>@foreach(var line in r.Evidence){<li>@line</li>}</ul></div><div><h3>冲突与待确认</h3><ul>@foreach(var line in r.Conflicts.Concat(r.Missing)){<li>@line</li>}@if(r.Conflicts.Length+r.Missing.Length==0){<li>当前窗口数据完整；区域是否有效仍需检查后续反应。</li>}</ul><h3>接下来观察</h3><ul>@foreach(var line in r.Conditions){<li>@line</li>}</ul></div></div>
+        <details><summary>覆盖市场与规则</summary><p>现货：@string.Join(" / ",r.Window.SpotSources)</p><p>合约：@string.Join(" / ",r.Window.PerpetualSources)</p><p>OI：@r.Window.OiSource</p><p>参考阈值：价格变化超过 0.05%，主动买卖差超过总量 5%，OI 变化超过 0.1%。阈值用于整理证据，尚未校准为你的个人交易规则。</p><code>@r.Algorithm</code></details>
+        <div class="modal-actions"><button class="text-button" @onclick="Export">导出这次分析 ↗</button></div>
+    }
+    else { <p class="form-note">生成时会检查同一窗口的数据覆盖；缺失时会列出等待条件。</p> }
+    <p class="flow-note">规则解读提供条件性假设。CVD 表示主动成交差，OI 表示未平仓合约量；二者不能单独证明吸收、清算或未来价格方向。</p>
+</section>
+@code {
+    [Parameter] public MarketView View {get;set;}=MarketView.Empty;
+    [Parameter] public WatchZone[] Watches {get;set;}=[];
+    private int minutes=15;private MarketReading? reading;private string scope="";
+    protected override void OnParametersSet(){if(scope!=View.Scope){reading=null;scope=View.Scope;}}
+    private void Generate()=>reading=MarketReader.Build(View,Watches,minutes);
+    private async Task Export(){await using var files=await JS.InvokeAsync<IJSObjectReference>("import","./js/files.js");await files.InvokeVoidAsync("download","btclens-market-reading.json",JsonCodec.Write(reading));}
+}

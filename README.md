@@ -6,7 +6,7 @@
 
 BTC Lens combines a BTC market radar, chart drawings, user-selected watch zones, evidence snapshots and a trade journal. Built with .NET 10 and Blazor, it runs locally with public OKX market data.
 
-**当前 V0.2.4**：趋势线可加入动态关注，按斜率延伸并记录首次靠近或穿越。免费接入 OKX + Binance 现货与永续成交，支持共同分钟汇总 CVD、Delta、BTC/USDT 和共用时间轴的价格/OI 窗格。历史成交量选区自动补取、取消续传与多个选区管理继续保留。
+**当前 V0.2.5**：行情解读把 OB/FVG、关注区、价格反应、现货 / 合约 CVD 和 OI 放在同一窗口比较，输出支持、冲突和后续观察条件。可在「数据连接」填写免费 Coinalyze Key，接入所选多交易所历史买卖量与线性永续 OI。此前的动态趋势线、公共订单流和历史成交量选区继续保留。
 
 ![行情雷达与多个成交量选区：离线测试截图](docs/screenshots/radar.png)
 
@@ -26,6 +26,8 @@ dotnet run --project src/BtcLens.Web
 ~~~
 
 打开 **http://127.0.0.1:5080**。自动连接 OKX 实时公共行情，不再提供演示模式入口。
+
+可选：在 [Coinalyze 账户](https://coinalyze.net/account/api-key/) 领取免费 Key，在本地 `/settings` 验证并保存。Key 通过服务端请求头发送，加密保存在本机，不回显、不导出到报告。也支持本机 `Coinalyze__ApiKey` 环境配置。已配置但数据不可用时，行情解读明确暂停订单流确认，不悄悄替换来源。真实 Coinalyze 连接需用户提供 Key；隔离测试通过不代表已完成真实账户联调。
 
 也可以运行：
 
@@ -49,6 +51,8 @@ dotnet run --project src/BtcLens.Web
 8. **订单流**：现货和永续主动买卖 CVD 分开显示，单位统一为 BTC；OI 同时保留张数、BTC、USD。支持多交易所共同分钟汇总、BTC/USDT、Delta、共用时间轴和 1m/5m/15m 采样；采集段与原始成交可导出。
 9. **成交量分布**：图上选择多个独立时间范围，同时显示分布与 VAH / POC / VAL；分别定位、隐藏和删除。基于固定 5m 数据近似计算，保存原始证据并可从位置加入关注。
 10. **VWAP**：当前日/周/月的已收盘 5m HLC3 加权近似，支持 UTC / UTC+8 重置；历史分页、覆盖状态、缺口与图层开关。
+11. **行情解读**：15m / 1h 的完整收盘窗口，价格变化、主动买卖差及原生 BTC OI 变化；结合日线/4H 收盘背景、附近 OB/FVG/关注区、参考局部回收和 N2 结构破位。点击生成后冻结本次解读，可导出 JSON。
+12. **Coinalyze**：免费 Key、市场选择、90 秒历史刷新、按所选市场共同分钟整理 CVD 与 OI；未知单位、币本位和交割合约不混合。详见 [订单流口径](docs/ORDER_FLOW.md) 和 [行情解读规则](docs/MARKET_READING.md)。
 
 ![历史 V0.2.1 成交量选区与 VWAP：合成演示](docs/screenshots/price-context.png)
 

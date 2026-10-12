@@ -77,3 +77,4 @@ V0.2.1 使用独立 `PriceContextWorker` 补充当前周/月起点的已收盘 5
 ## 边界
 
 缓存服务于存储与审查；实时启动时重新获取行情，不把缓存视为新鲜报价。首版不使用私有账户 API、自动交易、外部通知、Redis 或消息队列。多用户部署、分批成交与数据库切换是独立扩展任务。
+V0.2.5 的 `CoinalyzeClient` 只在服务端请求头发送 Key，按 symbol 消费额度并遵守 429 重试时间。`CoinalyzeEngine` 保存无凭据的提供方快照，独立于逐笔公共采集；`CoinalyzeConnection` 用本地 Data Protection 加密 Key，Windows 保护密钥环使用当前用户 DPAPI。可选市场和完整共同分钟由 `ProviderFlow` 处理，配置改变不拼接不同基线。`MarketReader` 在明确截止时间与同一收盘窗口生成条件式解释，并保存实际价格、汇总分钟量和 OI 输入；新分析不改写过去事件。规则阈值、N2 候选和个人确认规则分开说明。测试 HTTP 提供方只注册于 Testing + OfflineFixture，生产环境不提供伪数据入口。

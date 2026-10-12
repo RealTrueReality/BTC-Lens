@@ -8,6 +8,7 @@ public sealed class MarketEngine
     private readonly ILensStore store;
     private readonly OkxClient okx;
     private readonly OrderFlowEngine? orderFlow;
+    private readonly CoinalyzeEngine? coinalyze;
     private readonly TimeProvider clock;
     private readonly ProfileHistoryLoader profileHistory;
     private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
@@ -18,17 +19,18 @@ public sealed class MarketEngine
     private readonly Dictionary<string, PriceSample> samples = new();
     private Candle[] contextCache = [];
     private string contextStatus = "等待 5m 历史", contextError = "";
-    public MarketView View { get { var state = Volatile.Read(ref view); return state.Mode == "live" ? state with { Flow = orderFlow?.View ?? FlowView.Empty, Cutoff = Now } : state; } }
+    public MarketView View { get { var state = Volatile.Read(ref view); return state.Mode == "live" ? state with { Flow = orderFlow?.View ?? FlowView.Empty, ProviderFlow=coinalyze?.View??ProviderFlowView.Empty, Cutoff = Now } : state; } }
     public event Action? Changed;
 
-    public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null, TimeProvider? timeProvider = null, bool useFixture = false)
+    public MarketEngine(ILensStore store, OkxClient okx, OrderFlowEngine? orderFlow = null, TimeProvider? timeProvider = null, bool useFixture = false,CoinalyzeEngine? coinalyze=null)
     {
-        this.store = store; this.okx = okx; this.orderFlow = orderFlow; clock = timeProvider ?? TimeProvider.System;
+        this.store = store; this.okx = okx; this.orderFlow = orderFlow;this.coinalyze=coinalyze; clock = timeProvider ?? TimeProvider.System;
         profileHistory = new(store, okx);
         this.useFixture = useFixture; fixture = useFixture ? DemoMarket.Generate() : [];
         var earliest = clock.GetUtcNow().AddDays(-40).ToUnixTimeMilliseconds();
         contextCache = store.ReadCandles("live:analysis", earliest, Now).ToArray();
         if (orderFlow is not null) orderFlow.Changed += Notify;
+        if(coinalyze is not null)coinalyze.Changed+=Notify;
         if (!useFixture) { view = Enrich(LiveEmpty() with { ContextCandles = contextCache }); store.SetSetting("market-mode", "live"); return; }
         var session = store.GetSetting("demo-session") ?? Guid.NewGuid().ToString("N")[..10];
         store.SetSetting("demo-session", session);
@@ -364,7 +366,7 @@ public sealed class MarketEngine
                     rule = WatchRules.RuleVersion(w.Current), transition, observedBounds = WatchRules.Bounds(w.Current, quote.Timestamp), previousQuote = prior ?? observed.LastSample,
                     instrument = view.Instrument, sourceZone = view.Zones.FirstOrDefault(z => z.Id == w.Current.SourceZoneId),
                     candles = view.Candles.ToDictionary(x => x.Key, x => x.Value.Where(c => c.Confirmed && c.CloseTime <= view.Cutoff).TakeLast(20).ToArray()),
-                    levels = view.Levels, dataStatus = view.Status, orderFlow = View.Flow, priceContext = view.PriceContext.Evidence(view.Cutoff),
+                    levels = view.Levels, dataStatus = view.Status, orderFlow = View.Flow, providerFlow=View.ProviderFlow, priceContext = view.PriceContext.Evidence(view.Cutoff),
                     gaps = view.Candles.Where(x => HasGap(x.Value, view.Cutoff)).Select(x => x.Key).ToArray() };
                 var alert = new AlertEvent(WatchRules.EventId(w), w.Scope, w.Id, w.Current.Revision,
                     DateTimeOffset.FromUnixTimeMilliseconds(quote.Timestamp), quote.Price, quote.Transport, w.Current,

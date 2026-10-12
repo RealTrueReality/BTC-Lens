@@ -1,6 +1,7 @@
 **/bin/
 **/obj/
 **/App_Data/
+**/data-protection-keys/
 **/logs/
 **/node_modules/
 **/test-results/

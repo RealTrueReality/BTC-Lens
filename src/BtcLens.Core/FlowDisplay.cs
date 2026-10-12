@@ -1,6 +1,9 @@
 namespace BtcLens.Core;
 
-public sealed record FlowDisplayPoint(string SegmentId,string Instrument,long Timestamp,decimal Cvd,decimal Delta);
+public sealed record FlowDisplayPoint(string SegmentId,string Instrument,long Timestamp,decimal Cvd,decimal Delta)
+{
+    public decimal Volume { get; init; }
+}
 public sealed record FlowDisplayResult(FlowDisplayPoint[] Points,string[] Exchanges,long RequestedStart,long? ActualStart,long KnownAt,int MissingMinutes,string Unit);
 public static class FlowDisplay
 {
@@ -38,7 +41,7 @@ public static class FlowDisplay
                 if(previous!=minute-60_000 || signature!=priorSignature)
                 { cvd=0;group=instrument+":"+unit+":"+signature+":"+minute; }
                 var delta=values.Sum(p=>unit=="BTC"?p.BuyBtc-p.SellBtc:p.BuyUsdt!.Value-p.SellUsdt!.Value);
-                cvd+=delta;result.Add(new(group!,instrument,minute+60_000,cvd,delta));
+                cvd+=delta;result.Add(new(group!,instrument,minute+60_000,cvd,delta) { Volume=values.Sum(p=>unit=="BTC"?p.BuyBtc+p.SellBtc:p.BuyUsdt!.Value+p.SellUsdt!.Value) });
                 actual=actual is null?minute:Math.Min(actual.Value,minute);previous=minute;priorSignature=signature;
             }
         }

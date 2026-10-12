@@ -1,0 +1,50 @@
+@page "/settings"
+@implements IDisposable
+@inject BtcLens.Web.Services.CoinalyzeConnection Connection
+@inject CoinalyzeEngine Provider
+<PageTitle>数据连接 · BTC Lens</PageTitle>
+<div class="page-heading"><div><div class="eyebrow">DATA CONNECTION</div><h1>数据连接<span class="title-dot">.</span></h1><p>为行情解读补充多交易所历史订单流。</p></div></div>
+<section class="panel connection-panel" data-testid="coinalyze-settings" data-ready="@ready.ToString().ToLowerInvariant()">
+    <div class="panel-heading"><h2>Coinalyze</h2><span class="pill">@(Connection.Key is null?"尚未连接":"已保存连接")</span></div>
+    <p>免费 API，需要在 <a href="https://coinalyze.net/account/api-key/" target="_blank" rel="noopener noreferrer">Coinalyze 申请 API Key ↗</a>。读取历史主动买卖量与线性永续 OI，每 90 秒刷新。<a href="https://api.coinalyze.net/v1/doc/" target="_blank" rel="noopener noreferrer">接口说明 ↗</a></p>
+    @if(!Connection.EnvironmentManaged)
+    {
+        <form @onsubmit="Connect" @onsubmit:preventDefault><label>Coinalyze API Key<input type="password" autocomplete="new-password" @bind="candidate" @bind:event="oninput" disabled="@busy" placeholder="填写新 Key，已保存的 Key 不回显" /></label><div class="modal-actions"><button class="button primary" disabled="@(busy || string.IsNullOrWhiteSpace(candidate))">@(busy?"正在核对连接…":"验证并保存连接")</button>@if(Connection.Key is not null){<button type="button" class="button ghost" disabled="@busy" @onclick="Disconnect">移除连接</button>}</div></form>
+    }
+    else { <p class="muted">当前 Key 由本机环境配置提供。</p> }
+    @if(message is not null){<div class="@(error?"inline-error":"form-note")" role="status">@message</div>}
+    <p class="form-note">Key 在本机加密保存，浏览器不会收到已保存的 Key；GitHub 和报告中不包含 Key。</p>
+    @if(markets.Length>0)
+    {
+        <h3>分析覆盖的市场</h3><p class="muted">当前选择 @selection.Count 个市场，每次刷新 @Cost 个额度。现货每个 1 个额度，永续每个 2 个；上限 28。只汇总所选市场共同覆盖的已收盘分钟。</p>
+        <div class="market-choice-grid">@foreach(var instrument in FlowRules.Instruments){<div><h3>@(instrument==FlowRules.Spot?"现货":"线性永续 · BTC 单位")</h3>@foreach(var m in markets.Where(m=>m.Instrument==instrument)){<label><input type="checkbox" checked="@selection.Contains(m.Symbol)" disabled="@busy" @onchange="e=>Toggle(m.Symbol,(bool)e.Value!)" /><span>@m.Exchange · @m.Symbol</span></label>}</div>}</div>
+        <div class="modal-actions"><button class="button primary" disabled="@busy" @onclick="SaveSelection">保存市场并刷新</button></div>
+    }
+    <p class="flow-note">当前支持 BTC/USD、USDT、USDC 现货，以及原生 OI/成交量单位为 BTC 的稳定币保证金永续。币本位、交割合约及单位无法核对的市场未纳入。多交易所覆盖仍受提供方支持范围和免费历史长度限制。</p>
+</section>
+@code {
+    private string candidate="";private bool busy,error,ready;private string? message;
+    private ProviderMarket[] markets=[];private HashSet<string> selection=[];
+    private readonly CancellationTokenSource lifetime=new();
+    private int Cost=>markets.Where(m=>selection.Contains(m.Symbol)).Sum(m=>m.Instrument==FlowRules.Perpetual?2:1);
+    protected override void OnInitialized(){markets=Provider.View.Available;selection=Provider.View.Selected.ToHashSet();}
+    protected override void OnAfterRender(bool firstRender){if(firstRender){ready=true;StateHasChanged();}}
+    private void Toggle(string symbol,bool enabled){if(enabled)selection.Add(symbol);else selection.Remove(symbol);}
+    private async Task Connect()
+    {
+        busy=true;message=null;error=false;
+        try
+        {
+            var verified=await Provider.VerifyAsync(candidate.Trim(),lifetime.Token);
+            Connection.Save(candidate.Trim());candidate="";markets=verified;selection=CoinalyzeClient.DefaultSelection(markets).ToHashSet();
+            Provider.Configure(markets,selection.ToArray());await Provider.RefreshAsync(lifetime.Token);
+            message=Provider.View.Error??"已连接。行情解读优先使用 Coinalyze 所选市场的数据。";error=Provider.View.Error is not null;
+        }
+        catch(OperationCanceledException)when(lifetime.IsCancellationRequested){}
+        catch(Exception ex){message=ex is InvalidDataException or ArgumentException?ex.Message:"连接失败，请检查网络后重试。";error=true;}
+        finally{busy=false;}
+    }
+    private async Task SaveSelection(){busy=true;error=false;try{Provider.Configure(markets,selection.ToArray());await Provider.RefreshAsync(lifetime.Token);message=Provider.View.Error??"已更新分析覆盖市场。";error=Provider.View.Error is not null;}catch(OperationCanceledException)when(lifetime.IsCancellationRequested){}catch(Exception ex){message=ex is ArgumentException?ex.Message:"刷新失败，请稍后重试。";error=true;}finally{busy=false;}}
+    private void Disconnect(){Connection.Clear();Provider.Disconnect();candidate="";markets=[];selection=[];message="已移除连接，行情解读使用 OKX + Binance 公共采集。";error=false;}
+    public void Dispose(){lifetime.Cancel();lifetime.Dispose();}
+}
